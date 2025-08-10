@@ -1,103 +1,159 @@
-import Image from "next/image";
+"use client";
+import { useEffect, useState } from "react";
+
+type Status = {
+  watchlistUrl: string | null;
+  titleCount: number;
+  knownCount: number;
+  feed?: string;
+};
+
+type MatchItem = {
+  wishlist: string;
+  feedTitle: string;
+  link?: string;
+  pubDate?: string;
+};
 
 export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [status, setStatus] = useState<Status | null>(null);
+  const [matches, setMatches] = useState<MatchItem[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [checking, setChecking] = useState(false);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  async function loadStatus() {
+    const s = await fetch("/api/status").then(r => r.json());
+    setStatus(s);
+  }
+  useEffect(() => { loadStatus(); }, []);
+
+  async function manualRefresh() {
+    setRefreshing(true);
+    try {
+      const res = await fetch("/api/refresh", { method: "POST" });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "Refresh failed");
+      await loadStatus();
+      (document.getElementById("refresh_toast") as HTMLDialogElement)?.showModal();
+    } catch (e: any) {
+      alert(e.message || "Refresh failed");
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  async function checkNow() {
+    setChecking(true);
+    try {
+      const res = await fetch("/api/check", { method: "POST" });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "Check failed");
+      setMatches(data.matches || []);
+    } catch (e: any) {
+      alert(e.message || "Check failed");
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-base-200">
+      <div className="max-w-4xl mx-auto p-6 space-y-6">
+        <h1 className="text-3xl font-bold">IMDb Digital Release Notifier</h1>
+        <p className="opacity-70">
+          Reads your IMDb watchlist ({status?.watchlistUrl || "set WATCHLIST_URL in .env.local"}) and matches against the DVDsReleaseDates RSS.
+        </p>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <div className="card bg-base-100 shadow">
+            <div className="card-body">
+              <h2 className="card-title">Refresh titles & check feed</h2>
+              <p className="text-sm opacity-70">Runs one full cycle (fetch watchlist, parse RSS, email new matches).</p>
+              <button className={`btn btn-primary ${refreshing ? "btn-disabled" : ""}`} onClick={manualRefresh} disabled={refreshing}>
+                {refreshing ? "Refreshing…" : "Refresh now"}
+              </button>
+              <dialog id="refresh_toast" className="modal modal-bottom sm:modal-middle">
+                <div className="modal-box">
+                  <h3 className="font-bold text-lg">Done</h3>
+                  <p className="py-4">Watchlist refreshed and feed checked. Emails sent for new matches.</p>
+                  <div className="modal-action">
+                    <form method="dialog"><button className="btn">OK</button></form>
+                  </div>
+                </div>
+              </dialog>
+            </div>
+          </div>
+
+          <div className="card bg-base-100 shadow">
+            <div className="card-body">
+              <h2 className="card-title">Check feed only</h2>
+              <p className="text-sm opacity-70">Compares current stored titles to the RSS (no email).</p>
+              <button className={`btn btn-secondary ${checking ? "btn-disabled" : ""}`} onClick={checkNow} disabled={checking}>
+                {checking ? "Checking…" : "Check now"}
+              </button>
+            </div>
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+
+        <div className="card bg-base-100 shadow">
+          <div className="card-body">
+            <h2 className="card-title">Status</h2>
+            {!status ? (
+              <div className="skeleton h-6 w-48" />
+            ) : (
+              <div className="stats stats-vertical lg:stats-horizontal shadow">
+                <div className="stat">
+                  <div className="stat-title">Watchlist</div>
+                  <div className="stat-value text-sm truncate max-w-xs">{status.watchlistUrl || "—"}</div>
+                </div>
+                <div className="stat">
+                  <div className="stat-title">Stored Titles</div>
+                  <div className="stat-value">{status.titleCount}</div>
+                </div>
+                <div className="stat">
+                  <div className="stat-title">Known Matches</div>
+                  <div className="stat-value">{status.knownCount}</div>
+                </div>
+                <div className="stat">
+                  <div className="stat-title">Feed</div>
+                  <div className="stat-value text-sm">{status.feed}</div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="card bg-base-100 shadow">
+          <div className="card-body">
+            <h2 className="card-title">Latest matches</h2>
+            {matches.length === 0 ? (
+              <div className="alert"><span>No matches yet. Try “Check now”.</span></div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="table">
+                  <thead>
+                    <tr><th>Wishlist</th><th>Feed Title</th><th>Date</th><th>Link</th></tr>
+                  </thead>
+                  <tbody>
+                    {matches.map((m, i) => (
+                      <tr key={i}>
+                        <td className="font-medium">{m.wishlist}</td>
+                        <td>{m.feedTitle}</td>
+                        <td className="whitespace-nowrap">{m.pubDate || "—"}</td>
+                        <td><a className="link link-primary" href={m.link} target="_blank">Open</a></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <footer className="text-center opacity-60 text-sm">
+          Uses RSS: <code>https://feeds.feedburner.com/DVDsReleaseDates</code>
+        </footer>
+      </div>
     </div>
   );
 }
