@@ -9,10 +9,10 @@ export const normalize = (s: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
-export function isMatch(a: string, b: string, threshold = 0.82) {
-  const A = normalize(a),
-    B = normalize(b);
+export const isMatch = (rssTitle: string, storeTitle: string, threshold = 0.82) => {
+  const A = normalize(rssTitle),
+    B = normalize(storeTitle);
   if (!A || !B) return false;
-  if (A === B) return true;
+  if (A.includes(B)) return true;
   return stringSimilarity.compareTwoStrings(A, B) >= threshold;
-}
+};

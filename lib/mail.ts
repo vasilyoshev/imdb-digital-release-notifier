@@ -1,6 +1,8 @@
 import nodemailer from "nodemailer";
 
-export async function sendMatchesEmail(matches: { wishlist: string; feedTitle: string; link?: string; pubDate?: string; }[]) {
+export const sendMatchesEmail = async (
+  matches: { wishlist: string; feedTitle: string; link?: string; pubDate?: string; }[]
+) => {
   const { SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS, ALERT_EMAILS } = process.env;
   if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS || !ALERT_EMAILS) return;
 

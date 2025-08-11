@@ -10,7 +10,7 @@ export async function POST() {
   const store = await readStore();
   const titles = await fetchWatchlistTitles();
 
-  const items = await getFeedItems(process.env.FEED_URL!);
+  const items = await getFeedItems();
   const matches: { wishlist: string; feedTitle: string; link?: string; pubDate?: string; }[] = [];
 
   for (const it of items) {

@@ -1,6 +1,6 @@
 import * as cheerio from "cheerio";
 
-async function fetchHtml(url: string, cookie?: string) {
+const fetchHtml = async (url: string, cookie?: string) => {
   const res = await fetch(url, {
     headers: {
       "User-Agent": "Mozilla/5.0",
@@ -11,9 +11,9 @@ async function fetchHtml(url: string, cookie?: string) {
   });
   if (!res.ok) throw new Error(`IMDb fetch failed: ${res.status}`);
   return await res.text();
-}
+};
 
-function extractFromEmbeddedJSON(html: string): string[] {
+const extractFromEmbeddedJSON = (html: string): string[] => {
   const titles = new Set<string>();
   const patterns = [
     /window\.__INITIAL_STATE__\s*=\s*(\{[\s\S]*?\});/,
@@ -39,9 +39,9 @@ function extractFromEmbeddedJSON(html: string): string[] {
     } catch {}
   }
   return Array.from(titles);
-}
+};
 
-function extractFromDOM(html: string): string[] {
+const extractFromDOM = (html: string): string[] => {
   const $ = cheerio.load(html);
   const titles = new Set<string>();
 
@@ -65,9 +65,9 @@ function extractFromDOM(html: string): string[] {
   }
 
   return Array.from(titles);
-}
+};
 
-export async function fetchWatchlistTitles(): Promise<string[]> {
+export const fetchWatchlistTitles = async (): Promise<string[]> => {
   const url = process.env.WATCHLIST_URL!;
   if (!url) return [];
   const cookie = process.env.IMDB_COOKIE || "";
@@ -77,4 +77,4 @@ export async function fetchWatchlistTitles(): Promise<string[]> {
   return Array.from(new Set(titles))
     .map(t => t.replace(/\s+\(\d{4}\)$/, "").trim())
     .filter(Boolean);
-}
+};
