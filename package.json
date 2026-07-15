@@ -12,7 +12,7 @@
     "db:stop": "supabase stop",
     "db:reset": "supabase db reset",
     "fn:serve": "supabase functions serve refresh --env-file supabase/functions/.env --no-verify-jwt",
-    "test:fn": "deno test --allow-none supabase/functions"
+    "test:fn": "deno test supabase/functions"
   },
   "dependencies": {
     "cheerio": "^1.1.2",
