@@ -15,7 +15,8 @@ select cron.schedule(
       'Content-Type', 'application/json',
       'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'service_role_key')
     ),
-    body := '{}'::jsonb
+    body := '{}'::jsonb,
+    timeout_milliseconds := 300000
   );
   $$
 );

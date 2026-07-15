@@ -145,7 +145,7 @@ Edge Function limits are a non-issue: one GraphQL call + ~3 discover pages + ~27
 
 **Delivery gating (amendment):** detection always runs and always logs; a detected event is **delivered** only if the movie sits on at least one `notifications_enabled` list and global Pause is off. Otherwise the row is written silent (`sent_at NULL`) — so toggling notifications on later does not flood past events.
 
-**Bootstrap — one uniform new-title rule (no special first-sync mode):** when a title is first observed, events whose dates are already past are **seeded silently** (`sent_at NULL`); only present/future facts notify. First-ever sync (~216 watchlist + 50 popular titles) therefore produces **zero notifications**. Adding an old, already-released movie later → silent. Accepted edge: a movie released yesterday, added today, gets no ping.
+**Bootstrap — one uniform new-title rule (no special first-sync mode):** when a title is first observed, events whose dates are already past are **seeded silently** (`sent_at NULL`); only present/future facts notify. First-ever sync (~216 watchlist + 50 popular titles) therefore delivers zero *released* notifications; announced events for genuinely upcoming titles do deliver (the uniform rule — an upcoming movie added to a list notifies its future dates). Adding an old, already-released movie later → silent. Accepted edge: a movie released yesterday, added today, gets no ping.
 
 ## 8. Notification channels
 
@@ -207,7 +207,7 @@ Edge Function limits are a non-issue: one GraphQL call + ~3 discover pages + ~27
 4. **Auth** — create Vasil's account (email + password), then disable signups.
 5. **Cron** — schedule the hourly pg_cron job invoking the function with the service-role key (from Vault on self-hosted).
 6. **Netlify** — create the site from this repo (Vite build, SPA fallback redirect); env: Supabase URL, anon key, VAPID public key.
-7. **First run** — sign in, confirm the seeded lists (watchlist `ur27331503`, Popular defaults), hit Refresh now. Expected: both lists ingested, **zero notifications** (everything seeds silently).
+7. **First run** — sign in, confirm the seeded lists (watchlist `ur27331503`, Popular defaults), hit Refresh now. Expected: both lists ingested; all past facts seed silently; only a handful of announced events for upcoming titles deliver.
 
 ## 14. Decision record
 

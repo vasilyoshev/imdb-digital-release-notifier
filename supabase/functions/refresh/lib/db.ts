@@ -25,6 +25,7 @@ export interface MovieRow {
   title: string | null;
   year: number | null;
   poster_path: string | null;
+  first_refreshed_at: string | null;
 }
 
 function unwrap<T>(res: { data: T | null; error: { message: string } | null }, what: string): T {
@@ -65,14 +66,14 @@ export async function closeRun(
 
 export async function getAllMovies(db: SupabaseClient): Promise<MovieRow[]> {
   return unwrap(
-    await db.from("movies").select("id, imdb_id, tmdb_id, title, year, poster_path"),
+    await db.from("movies").select("id, imdb_id, tmdb_id, title, year, poster_path, first_refreshed_at"),
     "getAllMovies",
   );
 }
 
 export async function insertMovie(db: SupabaseClient, fields: Partial<MovieRow>): Promise<MovieRow> {
   return unwrap(
-    await db.from("movies").insert(fields).select("id, imdb_id, tmdb_id, title, year, poster_path").single(),
+    await db.from("movies").insert(fields).select("id, imdb_id, tmdb_id, title, year, poster_path, first_refreshed_at").single(),
     "insertMovie",
   );
 }

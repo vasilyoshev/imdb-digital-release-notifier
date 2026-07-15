@@ -12,6 +12,9 @@ const MEDIUMS: Medium[] = ["theatrical", "digital"];
 
 Deno.serve(async (req: Request) => {
   const role = roleFromAuthHeader(req.headers.get("authorization"));
+  if (role !== "service_role" && role !== "authenticated") {
+    return Response.json({ error: "forbidden" }, { status: 403 });
+  }
   const trigger: "cron" | "manual" = role === "service_role" ? "cron" : "manual";
 
   const db = createServiceClient(
@@ -36,7 +39,6 @@ Deno.serve(async (req: Request) => {
     const movies = await getAllMovies(db);
     const byImdb = new Map(movies.filter((m) => m.imdb_id).map((m) => [m.imdb_id!, m]));
     const byTmdb = new Map(movies.filter((m) => m.tmdb_id).map((m) => [m.tmdb_id!, m]));
-    const newMovieIds = new Set<number>();
 
     // ---- 2. Sync each sync-enabled list (soft membership, never delete)
     const activeIds = new Set<number>();
@@ -55,7 +57,6 @@ Deno.serve(async (req: Request) => {
           if (!movie) {
             movie = await insertMovie(db, { imdb_id: item.imdbId, title: item.title, year: item.year });
             byImdb.set(item.imdbId, movie);
-            newMovieIds.add(movie.id);
           }
           listMovieIds.push(movie.id);
         }
@@ -68,7 +69,6 @@ Deno.serve(async (req: Request) => {
               tmdb_id: item.tmdbId, title: item.title, year: item.year, poster_path: item.posterPath,
             });
             byTmdb.set(item.tmdbId, movie);
-            newMovieIds.add(movie.id);
           }
           listMovieIds.push(movie.id);
         }
@@ -98,7 +98,6 @@ Deno.serve(async (req: Request) => {
         byImdb.set(movie.imdb_id!, existing);
         activeIds.delete(movie.id);
         activeIds.add(existing.id);
-        newMovieIds.delete(movie.id);
       } else {
         await updateMovie(db, movie.id, { tmdb_id: tmdbId });
         movie.tmdb_id = tmdbId;
@@ -126,10 +125,12 @@ Deno.serve(async (req: Request) => {
       const bundle = await fetchMovieBundle(movie.tmdb_id!, tmdbToken);
       if (!bundle) continue;
       matched++;
+      const isNewMovie = movie.first_refreshed_at === null;
       const patch: Record<string, unknown> = {
         title: bundle.title ?? movie.title,
         year: bundle.year ?? movie.year,
         poster_path: bundle.posterPath ?? movie.poster_path,
+        first_refreshed_at: movie.first_refreshed_at ?? new Date().toISOString(),
       };
       if (bundle.imdbId && !movie.imdb_id && !byImdb.has(bundle.imdbId)) {
         patch.imdb_id = bundle.imdbId;
@@ -146,7 +147,7 @@ Deno.serve(async (req: Request) => {
         const detected = detectMediumEvents({
           currentEffective: eff?.date ?? null,
           state,
-          isNewMovie: newMovieIds.has(movie.id),
+          isNewMovie,
           today,
         });
         for (const ev of detected) {
@@ -234,7 +235,11 @@ Deno.serve(async (req: Request) => {
     });
     return Response.json(summary);
   } catch (err) {
-    await closeRun(db, runId, { status: "error", error: String(err) });
+    try {
+      await closeRun(db, runId, { status: "error", error: String(err) });
+    } catch (closeErr) {
+      console.error("failed to close run:", closeErr);
+    }
     console.error("refresh run failed:", err);
     return Response.json({ runId, error: String(err) }, { status: 500 });
   }

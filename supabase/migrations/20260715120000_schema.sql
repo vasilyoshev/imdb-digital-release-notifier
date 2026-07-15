@@ -12,6 +12,7 @@ create table public.movies (
   digital_date date,
   digital_region text,
   created_at timestamptz not null default now(),
+  first_refreshed_at timestamptz,
   check (imdb_id is not null or tmdb_id is not null)
 );
 
@@ -134,9 +135,18 @@ create policy push_select on public.push_subscriptions for select to authenticat
 create policy push_insert on public.push_subscriptions for insert to authenticated with check (true);
 create policy push_delete on public.push_subscriptions for delete to authenticated using (true);
 
--- Base privileges (RLS is the fine-grained gate for authenticated; service
--- role needs full access and does NOT get it implicitly on locally-owned tables)
+-- Base privileges (RLS is the row gate; base grants mirror the spec §10 matrix)
 grant usage on schema public to authenticated, service_role;
 grant all privileges on all tables in schema public to service_role;
-grant select, insert, update, delete on all tables in schema public to authenticated;
-grant usage, select on all sequences in schema public to authenticated, service_role;
+grant usage, select on all sequences in schema public to service_role;
+grant select on all tables in schema public to authenticated;
+grant update on public.lists to authenticated;
+grant insert, update, delete on public.settings to authenticated;
+grant insert, update, delete on public.push_subscriptions to authenticated;
+grant usage, select on all sequences in schema public to authenticated;
+
+-- Future tables/sequences created by migrations (as postgres) get the same baseline
+alter default privileges for role postgres in schema public grant all on tables to service_role;
+alter default privileges for role postgres in schema public grant usage, select on sequences to service_role;
+alter default privileges for role postgres in schema public grant select on tables to authenticated;
+alter default privileges for role postgres in schema public grant usage, select on sequences to authenticated;
