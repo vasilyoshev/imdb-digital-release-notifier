@@ -133,3 +133,10 @@ create policy settings_update on public.settings for update to authenticated usi
 create policy push_select on public.push_subscriptions for select to authenticated using (true);
 create policy push_insert on public.push_subscriptions for insert to authenticated with check (true);
 create policy push_delete on public.push_subscriptions for delete to authenticated using (true);
+
+-- Base privileges (RLS is the fine-grained gate for authenticated; service
+-- role needs full access and does NOT get it implicitly on locally-owned tables)
+grant usage on schema public to authenticated, service_role;
+grant all privileges on all tables in schema public to service_role;
+grant select, insert, update, delete on all tables in schema public to authenticated;
+grant usage, select on all sequences in schema public to authenticated, service_role;
