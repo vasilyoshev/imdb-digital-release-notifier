@@ -45,7 +45,7 @@ Deno.serve(async (req: Request) => {
         for (const m of await getMemberships(db, list.id)) if (m.on_list) activeIds.add(m.movie_id);
         continue;
       }
-      let listMovieIds: number[] = [];
+      const listMovieIds: number[] = [];
       if (list.kind === "imdb_watchlist") {
         const userId = String(list.config.imdb_user_id ?? "");
         if (!userId) throw new Error(`list ${list.id} (${list.name}) has no imdb_user_id`);
@@ -75,7 +75,6 @@ Deno.serve(async (req: Request) => {
       }
       const wanted = new Set(listMovieIds);
       const existing = await getMemberships(db, list.id);
-      const existingIds = new Set(existing.map((m) => m.movie_id));
       for (const movieId of wanted) {
         const prev = existing.find((m) => m.movie_id === movieId);
         if (!prev || !prev.on_list) await upsertMembership(db, list.id, movieId, true);
@@ -84,7 +83,6 @@ Deno.serve(async (req: Request) => {
         if (prev.on_list && !wanted.has(prev.movie_id)) await upsertMembership(db, list.id, prev.movie_id, false);
       }
       for (const id of wanted) activeIds.add(id);
-      void existingIds;
     }
 
     // ---- 3. Resolve identities: match imdb-only actives, merge collisions
@@ -182,9 +180,13 @@ Deno.serve(async (req: Request) => {
 
       const resendKey = Deno.env.get("RESEND_API_KEY");
       if (resendKey && settings.notify_email) {
-        const digest = buildDigest(digestEvents, appUrl);
-        if (digest) {
-          await sendDigest(resendKey, Deno.env.get("NOTIFY_FROM") ?? "onboarding@resend.dev", settings.notify_email, digest);
+        try {
+          const digest = buildDigest(digestEvents, appUrl);
+          if (digest) {
+            await sendDigest(resendKey, Deno.env.get("NOTIFY_FROM") ?? "onboarding@resend.dev", settings.notify_email, digest);
+          }
+        } catch (err) {
+          console.error("email digest failed:", err);
         }
       } else {
         console.warn("RESEND_API_KEY or notify_email missing — skipping email digest");
@@ -192,18 +194,22 @@ Deno.serve(async (req: Request) => {
 
       const vapid = Deno.env.get("VAPID_KEYS_JSON");
       if (vapid) {
-        const subs = await getSubscriptions(db);
-        const messages: PushMessage[] = digestEvents.map((e) => ({
-          title: e.event === "released"
-            ? `${e.movieTitle} is out now (${e.medium})`
-            : e.event === "announced"
-            ? `${e.movieTitle}: ${e.medium} date announced`
-            : `${e.movieTitle}: ${e.medium} date changed`,
-          body: `${e.medium} — ${e.effectiveDate}`,
-          url: appUrl,
-        }));
-        const result = await sendPushes(vapid, Deno.env.get("PUSH_CONTACT") ?? "mailto:vasil.yoshev@gmail.com", subs, messages);
-        await deleteSubscriptions(db, result.staleEndpoints);
+        try {
+          const subs = await getSubscriptions(db);
+          const messages: PushMessage[] = digestEvents.map((e) => ({
+            title: e.event === "released"
+              ? `${e.movieTitle} is out now (${e.medium})`
+              : e.event === "announced"
+              ? `${e.movieTitle}: ${e.medium} date announced`
+              : `${e.movieTitle}: ${e.medium} date changed`,
+            body: `${e.medium} — ${e.effectiveDate}`,
+            url: appUrl,
+          }));
+          const result = await sendPushes(vapid, Deno.env.get("PUSH_CONTACT") ?? "mailto:vasil.yoshev@gmail.com", subs, messages);
+          await deleteSubscriptions(db, result.staleEndpoints);
+        } catch (err) {
+          console.error("push delivery failed:", err);
+        }
       } else {
         console.warn("VAPID_KEYS_JSON missing — skipping push");
       }
