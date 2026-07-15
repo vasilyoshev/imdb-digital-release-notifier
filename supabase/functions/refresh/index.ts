@@ -1,4 +1,4 @@
-import { closeRun, createServiceClient, deleteSubscriptions, getAllMovies, getLists, getLogStates, getMemberships, getSettings, getSubscriptions, insertLogRows, insertMovie, markSent, mergeMovies, openRun, replaceProviders, replaceReleaseDates, updateMovie, upsertMembership, type MovieRow } from "./lib/db.ts";
+import { closeRun, createServiceClient, deleteSubscriptions, getAllMovies, getLists, getLogStates, getMemberships, getSettings, getSubscriptions, insertLogRows, insertMovie, markFirstRefreshed, markSent, mergeMovies, openRun, replaceProviders, replaceReleaseDates, updateMovie, upsertMembership, type MovieRow } from "./lib/db.ts";
 import { fetchWatchlist } from "./lib/imdb.ts";
 import { fetchDiscover, fetchMovieBundle, findTmdbId, type DiscoverConfig } from "./lib/tmdb.ts";
 import { computeEffective, sofiaHour, sofiaToday } from "./lib/dates.ts";
@@ -117,6 +117,7 @@ Deno.serve(async (req: Request) => {
     const allMoviesNow = await getAllMovies(db);
     const active = allMoviesNow.filter((m) => activeIds.has(m.id) && m.tmdb_id);
     let matched = 0;
+    const refreshedNewMovieIds: number[] = [];
     const pendingLog: {
       movie: MovieRow; medium: Medium; event: string; effective_date: string; silent: boolean;
     }[] = [];
@@ -126,11 +127,11 @@ Deno.serve(async (req: Request) => {
       if (!bundle) continue;
       matched++;
       const isNewMovie = movie.first_refreshed_at === null;
+      if (isNewMovie) refreshedNewMovieIds.push(movie.id);
       const patch: Record<string, unknown> = {
         title: bundle.title ?? movie.title,
         year: bundle.year ?? movie.year,
         poster_path: bundle.posterPath ?? movie.poster_path,
-        first_refreshed_at: movie.first_refreshed_at ?? new Date().toISOString(),
       };
       if (bundle.imdbId && !movie.imdb_id && !byImdb.has(bundle.imdbId)) {
         patch.imdb_id = bundle.imdbId;
@@ -164,6 +165,9 @@ Deno.serve(async (req: Request) => {
       effective_date: p.effective_date, sent_at: null,
     }));
     const ids = await insertLogRows(db, rows);
+    // A movie is "new" until its first refresh whose events were logged: stamping
+    // only after insertLogRows means a crash mid-run leaves it re-detectable.
+    await markFirstRefreshed(db, refreshedNewMovieIds);
     const toSend = pendingLog
       .map((p, i) => ({ ...p, logId: ids[i] }))
       .filter((p) => !p.silent);

@@ -86,6 +86,15 @@ export async function updateMovie(
   unwrap(await db.from("movies").update(patch).eq("id", id), "updateMovie");
 }
 
+export async function markFirstRefreshed(db: SupabaseClient, movieIds: number[]): Promise<void> {
+  if (!movieIds.length) return;
+  unwrap(
+    await db.from("movies").update({ first_refreshed_at: new Date().toISOString() })
+      .in("id", movieIds).is("first_refreshed_at", null),
+    "markFirstRefreshed",
+  );
+}
+
 export async function mergeMovies(db: SupabaseClient, stubId: number, canonicalId: number): Promise<void> {
   const stubMemberships = unwrap(
     await db.from("list_memberships").select("list_id, on_list").eq("movie_id", stubId),
