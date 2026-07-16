@@ -26,6 +26,10 @@ export interface RadarMovie {
   digital: Partial<Record<Region, string | null>>;
   providers: RadarProvider[];
   popularity: number;
+  /** Detail-view extras (ticket #43) — seeded blurbs, not real TMDB text. */
+  overview?: string;
+  runtime?: number;
+  genres?: string[];
 }
 
 const NF: RadarProvider = { name: "Netflix", kind: "stream" };
@@ -43,6 +47,8 @@ export const RADAR_MOVIES: RadarMovie[] = [
     theatricalDate: "2026-05-08",
     digital: { US: "2026-06-30", BG: "2026-07-08", GB: "2026-06-30", DE: "2026-07-10" },
     providers: [NF, ATV_R, GP_R], popularity: 675,
+    overview: "A grieving photographer becomes convinced her new neighbour is the man who ruined her life — and starts documenting his every move.",
+    runtime: 112, genres: ["Thriller", "Drama"],
   },
   {
     id: 1083381, title: "Backrooms", year: 2026,
@@ -50,6 +56,8 @@ export const RADAR_MOVIES: RadarMovie[] = [
     theatricalDate: "2026-05-22",
     digital: { US: "2026-07-14", BG: "2026-07-14", GB: "2026-07-14", DE: null },
     providers: [ATV_R, GP_R], popularity: 450,
+    overview: "Found-footage horror: a film crew maps an endless maze of fluorescent-lit office corridors that shouldn't exist.",
+    runtime: 97, genres: ["Horror"],
   },
   {
     id: 1314481, title: "The Devil Wears Prada 2", year: 2026,
@@ -137,6 +145,8 @@ export const RADAR_MOVIES: RadarMovie[] = [
     theatricalDate: "2026-03-20",
     digital: { US: "2026-05-12", BG: "2026-07-22", GB: "2026-05-14", DE: "2026-07-22" },
     providers: [MAX, ATV_B], popularity: 164,
+    overview: "A lone astronaut wakes up light-years from home with no memory and one job: save two species from extinction.",
+    runtime: 138, genres: ["Sci-Fi", "Adventure"],
   },
 ];
 

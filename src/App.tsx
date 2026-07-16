@@ -3,9 +3,12 @@ import { useAuth } from "./lib/auth-context";
 import { AppShell } from "./components/AppShell";
 import { LoginScreen } from "./components/LoginScreen";
 
-// PROTOTYPE (ticket #42): dev-only ?prototype=radar mount. Delete with src/prototype.
+// PROTOTYPE (tickets #42/#43): dev-only ?prototype= mounts. Delete with src/prototype.
 const RadarPrototype = import.meta.env.DEV
   ? lazy(() => import("./prototype/radar/RadarPrototype"))
+  : null;
+const DetailPrototype = import.meta.env.DEV
+  ? lazy(() => import("./prototype/detail/DetailPrototype"))
   : null;
 
 /**
@@ -16,10 +19,18 @@ const RadarPrototype = import.meta.env.DEV
 export default function App() {
   const { session, loading } = useAuth();
 
-  if (RadarPrototype && new URLSearchParams(window.location.search).get("prototype") === "radar") {
+  const proto = new URLSearchParams(window.location.search).get("prototype");
+  if (RadarPrototype && proto === "radar") {
     return (
       <Suspense fallback={null}>
         <RadarPrototype />
+      </Suspense>
+    );
+  }
+  if (DetailPrototype && proto === "detail") {
+    return (
+      <Suspense fallback={null}>
+        <DetailPrototype />
       </Suspense>
     );
   }

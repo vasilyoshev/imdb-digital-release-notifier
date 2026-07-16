@@ -7,12 +7,21 @@
  */
 import { useState } from "react";
 import { Mark } from "../../components/Mark";
-import { bucketFor, fmtFull, fmtShort, type Region } from "./data";
+import { bucketFor, fmtFull, fmtShort, type RadarMovie, type Region } from "./data";
 import { Attribution, ProviderChips, RadarPoster, RegionSelect } from "./bits";
 
 export const NAME = "Console radar";
 
-export function VariantA({ region, onRegion }: { region: Region; onRegion: (r: Region) => void }) {
+export function VariantA({
+  region,
+  onRegion,
+  onSelect,
+}: {
+  region: Region;
+  onRegion: (r: Region) => void;
+  /** Detail prototype (ticket #43): row click opens the detail view. */
+  onSelect?: (m: RadarMovie) => void;
+}) {
   const { recent, upcoming } = bucketFor(region);
   const [tab, setTab] = useState<"recent" | "upcoming">("recent");
   const rows = tab === "recent" ? recent : upcoming;
@@ -78,7 +87,11 @@ export function VariantA({ region, onRegion }: { region: Region; onRegion: (r: R
                 </thead>
                 <tbody>
                   {rows.map((m) => (
-                    <tr key={m.id} className="hover">
+                    <tr
+                      key={m.id}
+                      className={`hover ${onSelect ? "cursor-pointer" : ""}`}
+                      onClick={() => onSelect?.(m)}
+                    >
                       <td className="w-12">
                         <RadarPoster movie={m} className="w-9" />
                       </td>
