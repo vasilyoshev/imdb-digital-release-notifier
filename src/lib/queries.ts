@@ -1,19 +1,40 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "./supabase";
 import { toProvidersBG, type List, type Movie } from "./dashboard";
 import type { ActiveMovie, LogEntry } from "./rail";
+import type { RefreshRun, RefreshSummary, Settings, PushDevice } from "./settings";
 
-/** The lists that drive the switcher, ordered by their configured position. */
+interface ListRow {
+  id: number;
+  name: string;
+  kind: string;
+  position: number;
+  sync_enabled: boolean;
+  notifications_enabled: boolean;
+  config: Record<string, unknown>;
+}
+
+/** The lists that drive the switcher and settings, ordered by position. */
 export function useLists() {
   return useQuery({
     queryKey: ["lists"],
     queryFn: async (): Promise<List[]> => {
       const { data, error } = await supabase
         .from("lists")
-        .select("id, name, kind, position")
+        .select(
+          "id, name, kind, position, sync_enabled, notifications_enabled, config",
+        )
         .order("position");
       if (error) throw error;
-      return data ?? [];
+      return ((data ?? []) as ListRow[]).map((l) => ({
+        id: l.id,
+        name: l.name,
+        kind: l.kind,
+        position: l.position,
+        syncEnabled: l.sync_enabled,
+        notificationsEnabled: l.notifications_enabled,
+        config: l.config ?? {},
+      }));
     },
   });
 }
@@ -157,5 +178,143 @@ export function useNotificationLog() {
         movieTitle: r.movie?.title ?? "Untitled",
       }));
     },
+  });
+}
+
+// ---- Settings + run controls -------------------------------------------
+
+export function useSettings() {
+  return useQuery({
+    queryKey: ["settings"],
+    queryFn: async (): Promise<Settings> => {
+      const { data, error } = await supabase
+        .from("settings")
+        .select("region_order, notify_email, notifications_paused, notify_hour")
+        .single();
+      if (error) throw error;
+      return {
+        regionOrder: data.region_order,
+        notifyEmail: data.notify_email,
+        notificationsPaused: data.notifications_paused,
+        notifyHour: data.notify_hour,
+      };
+    },
+  });
+}
+
+/** The most recent run, for the navbar's last-run summary. */
+export function useLastRun() {
+  return useQuery({
+    queryKey: ["last-run"],
+    queryFn: async (): Promise<RefreshRun | null> => {
+      const { data, error } = await supabase
+        .from("refresh_runs")
+        .select("*")
+        .order("started_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return null;
+      return {
+        id: data.id,
+        trigger: data.trigger,
+        startedAt: data.started_at,
+        finishedAt: data.finished_at,
+        status: data.status,
+        moviesTotal: data.movies_total,
+        moviesMatched: data.movies_matched,
+        eventsCreated: data.events_created,
+        notificationsSent: data.notifications_sent,
+        error: data.error,
+      };
+    },
+  });
+}
+
+export function usePushDevices() {
+  return useQuery({
+    queryKey: ["push-devices"],
+    queryFn: async (): Promise<PushDevice[]> => {
+      const { data, error } = await supabase
+        .from("push_subscriptions")
+        .select("id, endpoint, created_at")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []).map((d) => ({
+        id: d.id,
+        endpoint: d.endpoint,
+        createdAt: d.created_at,
+      }));
+    },
+  });
+}
+
+export function useUpdateSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (patch: {
+      region_order?: string[];
+      notify_email?: string | null;
+      notifications_paused?: boolean;
+      notify_hour?: number;
+    }) => {
+      const { error } = await supabase.from("settings").update(patch).eq("id", true);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["settings"] }),
+  });
+}
+
+export function useUpdateList() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      patch,
+    }: {
+      id: number;
+      patch: {
+        sync_enabled?: boolean;
+        notifications_enabled?: boolean;
+        config?: Record<string, unknown>;
+      };
+    }) => {
+      const { error } = await supabase.from("lists").update(patch).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["lists"] }),
+  });
+}
+
+export function useDeletePushDevice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const { error } = await supabase.from("push_subscriptions").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["push-devices"] }),
+  });
+}
+
+/**
+ * "Refresh now" — invoke the refresh Edge Function with the user's session
+ * (role authenticated → a manual run that bypasses the gate hour). On success,
+ * refetch everything so the table, rail, and last-run summary reflect the run.
+ */
+export function useRefreshNow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (): Promise<RefreshSummary> => {
+      const { data, error } = await supabase.functions.invoke("refresh", {
+        method: "POST",
+        body: {},
+      });
+      if (error) throw error;
+      const payload = data as (RefreshSummary & { error?: string }) | null;
+      if (payload?.error) throw new Error(String(payload.error));
+      return payload as RefreshSummary;
+    },
+    onSuccess: () => qc.invalidateQueries(),
   });
 }

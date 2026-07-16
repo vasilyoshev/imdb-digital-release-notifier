@@ -1,18 +1,39 @@
 import { useAuth } from "../lib/auth-context";
+import { useLastRun, useRefreshNow } from "../lib/queries";
 import { Mark } from "./Mark";
 
+function fmtTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 /**
- * The app frame's top bar (SPEC §9). Structure matches the "Console" prototype:
- * wordmark · last-run summary · Refresh now · settings gear · account menu.
- * Refresh and settings are present but inert here — they get wired in the
- * refresh/settings slices (#34). The last-run summary is a placeholder until
- * refresh_runs data is fetched.
+ * The app frame's top bar (SPEC §9): wordmark · last-run summary · Refresh now
+ * · settings gear · account menu. Refresh invokes the pipeline (manual run);
+ * the gear opens the settings modal; the badge reflects the latest run.
  */
-export function Navbar() {
+export function Navbar({ onOpenSettings }: { onOpenSettings?: () => void }) {
   const { user, signOut } = useAuth();
+  const lastRun = useLastRun();
+  const refresh = useRefreshNow();
+
+  const lastRunLabel = lastRun.isLoading
+    ? "…"
+    : !lastRun.data
+      ? "never"
+      : lastRun.data.status === "running"
+        ? "running…"
+        : lastRun.data.status === "error"
+          ? "failed"
+          : `${lastRun.data.finishedAt ? fmtTime(lastRun.data.finishedAt) : "—"} · ${
+              lastRun.data.notificationsSent ?? 0
+            } sent`;
 
   return (
-    <header className="navbar sticky top-0 z-30 border-b border-base-300 bg-base-100/95 px-4 backdrop-blur">
+    <>
+      <header className="navbar sticky top-0 z-30 border-b border-base-300 bg-base-100/95 px-4 backdrop-blur">
       <div className="flex flex-1 items-center gap-3">
         <span className="flex items-center gap-2">
           <Mark className="h-6 w-6 text-primary" />
@@ -21,24 +42,26 @@ export function Navbar() {
           </span>
         </span>
         <span className="badge badge-ghost hidden gap-1 font-mono text-xs sm:inline-flex">
-          <span className="opacity-60">last run</span> never
+          <span className="opacity-60">last run</span> {lastRunLabel}
         </span>
       </div>
 
       <div className="flex flex-none items-center gap-2">
         <button
           className="btn btn-sm btn-outline btn-primary"
-          disabled
-          title="Available once the refresh slice lands"
+          onClick={() => refresh.mutate()}
+          disabled={refresh.isPending}
+          title="Run the pipeline now (bypasses the gate hour)"
         >
-          Refresh now
+          {refresh.isPending && <span className="loading loading-spinner loading-xs" />}
+          {refresh.isPending ? "Refreshing…" : "Refresh now"}
         </button>
 
         <button
           className="btn btn-ghost btn-sm btn-circle"
-          disabled
+          onClick={() => onOpenSettings?.()}
           aria-label="Settings"
-          title="Settings arrive with the settings slice"
+          title="Settings"
         >
           <GearIcon className="h-5 w-5" />
         </button>
@@ -64,7 +87,29 @@ export function Navbar() {
           </ul>
         </div>
       </div>
-    </header>
+      </header>
+
+      {(refresh.isError || refresh.isSuccess) && (
+        <div className="toast toast-end z-50">
+          <div className={`alert ${refresh.isError ? "alert-error" : "alert-success"}`}>
+            <span>
+              {refresh.isError
+                ? `Refresh failed: ${(refresh.error as Error).message}`
+                : `Refresh complete — ${refresh.data?.eventsCreated ?? 0} events · ${
+                    refresh.data?.notificationsSent ?? 0
+                  } sent`}
+            </span>
+            <button
+              className="btn btn-ghost btn-xs"
+              onClick={() => refresh.reset()}
+              aria-label="Dismiss"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
