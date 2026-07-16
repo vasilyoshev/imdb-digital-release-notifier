@@ -1,0 +1,47 @@
+name: Build & deploy to Netlify
+
+# Manual trigger only (no auto-deploy on push). Builds on GitHub's free runner
+# and deploys the pre-built `dist/` to Netlify with `--no-build`, so it never
+# consumes Netlify build minutes — only a plain deploy.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch/ref to build & deploy
+        default: rebuild
+        required: true
+
+concurrency:
+  group: netlify-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build (Vite)
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+          VITE_VAPID_PUBLIC_KEY: ${{ vars.VITE_VAPID_PUBLIC_KEY }}
+        run: npm run build
+
+      - name: Deploy to Netlify (deploy-only — no Netlify build minutes)
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+        run: >-
+          npx --yes netlify-cli@latest deploy
+          --prod --dir=dist --no-build
+          --site=${{ secrets.NETLIFY_SITE_ID }}
+          --message "GH Actions: ${{ inputs.ref }}@${{ github.sha }}"
