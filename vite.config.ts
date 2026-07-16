@@ -24,15 +24,20 @@ export default defineConfig({
         globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"],
       },
       manifest: {
-        name: "IMDb Digital Release Notifier",
+        name: "Release Notifier",
         short_name: "Notifier",
         description: "Theatrical and digital release alerts for your IMDb watchlist.",
-        theme_color: "#0f172a",
-        background_color: "#0f172a",
+        theme_color: "#0f1116",
+        background_color: "#0f1116",
         display: "standalone",
+        start_url: "/",
+        scope: "/",
+        icons: [
+          { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+          { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+          { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+        ],
       },
-      // The SW is fully wired (push handlers, install prompt) in a later slice;
-      // keep it out of the dev server for now.
       devOptions: { enabled: false, type: "module" },
     }),
   ],

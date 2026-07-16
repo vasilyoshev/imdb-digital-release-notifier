@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Navbar } from "./Navbar";
 import { Footer } from "./Footer";
+import { InstallBanner } from "./InstallBanner";
 import { Dashboard } from "./dashboard/Dashboard";
 import { SettingsModal } from "./dashboard/SettingsModal";
 
@@ -14,6 +15,7 @@ export function AppShell() {
 
   return (
     <div className="flex min-h-screen flex-col bg-base-200 text-base-content">
+      <InstallBanner />
       <Navbar onOpenSettings={() => setSettingsOpen(true)} />
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6">
         <Dashboard />

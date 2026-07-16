@@ -3,6 +3,7 @@ import { supabase } from "./supabase";
 import { toProvidersBG, type List, type Movie } from "./dashboard";
 import type { ActiveMovie, LogEntry } from "./rail";
 import type { RefreshRun, RefreshSummary, Settings, PushDevice } from "./settings";
+import { subscribeThisDevice } from "./push";
 
 interface ListRow {
   id: number;
@@ -293,6 +294,15 @@ export function useDeletePushDevice() {
       const { error } = await supabase.from("push_subscriptions").delete().eq("id", id);
       if (error) throw error;
     },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["push-devices"] }),
+  });
+}
+
+/** Subscribe the current device to web push and store it. */
+export function useSubscribeDevice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: subscribeThisDevice,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["push-devices"] }),
   });
 }

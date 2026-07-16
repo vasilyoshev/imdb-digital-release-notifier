@@ -5,9 +5,11 @@ import {
   useLists,
   usePushDevices,
   useSettings,
+  useSubscribeDevice,
   useUpdateList,
   useUpdateSettings,
 } from "../../lib/queries";
+import { pushConfigured, pushSupported } from "../../lib/push";
 import {
   parseImdbUserId,
   SORT_OPTIONS,
@@ -364,12 +366,41 @@ function SettingsForm({
 function PushDevices() {
   const devices = usePushDevices();
   const remove = useDeletePushDevice();
+  const subscribe = useSubscribeDevice();
+  const supported = pushSupported();
+  const configured = pushConfigured();
 
   return (
     <div>
-      <span className="mb-1 block text-xs font-medium text-base-content/60">
-        Push devices
-      </span>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-base-content/60">Push devices</span>
+        <button
+          className="btn btn-primary btn-xs"
+          onClick={() => subscribe.mutate()}
+          disabled={!supported || !configured || subscribe.isPending}
+          title={
+            !supported
+              ? "This browser doesn't support push"
+              : !configured
+                ? "Push isn't configured in this build yet"
+                : "Enable notifications on this device"
+          }
+        >
+          {subscribe.isPending && <span className="loading loading-spinner loading-xs" />}
+          Enable on this device
+        </button>
+      </div>
+      {subscribe.isError && (
+        <p className="mb-1 text-xs text-error">{(subscribe.error as Error).message}</p>
+      )}
+      {subscribe.isSuccess && (
+        <p className="mb-1 text-xs text-success">This device is now subscribed.</p>
+      )}
+      {!configured && (
+        <p className="mb-1 text-xs text-base-content/40">
+          Push isn’t configured in this build yet.
+        </p>
+      )}
       {devices.isLoading ? (
         <span className="loading loading-dots loading-sm" />
       ) : (devices.data ?? []).length === 0 ? (
