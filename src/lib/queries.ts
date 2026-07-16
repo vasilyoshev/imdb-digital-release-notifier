@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "./supabase";
 import { toProvidersBG, type List, type Movie } from "./dashboard";
+import type { ActiveMovie, LogEntry } from "./rail";
 
 /** The lists that drive the switcher, ordered by their configured position. */
 export function useLists() {
@@ -79,6 +80,82 @@ export function useListMovies(listId: number | undefined) {
           digitalRegion: m.digital_region,
           providersBG: toProvidersBG(m.watch_providers),
         }));
+    },
+  });
+}
+
+// A movie plus its at-least-one on_list membership (inner join), for the rail.
+interface ActiveMovieRow {
+  id: number;
+  title: string | null;
+  theatrical_date: string | null;
+  theatrical_region: string | null;
+  digital_date: string | null;
+  digital_region: string | null;
+}
+
+/**
+ * Every active movie — on at least one list — regardless of the switcher.
+ * The Upcoming timeline spans all lists, so it reads this rather than the
+ * per-list movies.
+ */
+export function useActiveMovies() {
+  return useQuery({
+    queryKey: ["active-movies"],
+    queryFn: async (): Promise<ActiveMovie[]> => {
+      const { data, error } = await supabase
+        .from("movies")
+        .select(
+          `id, title, theatrical_date, theatrical_region,
+           digital_date, digital_region, list_memberships!inner(on_list)`,
+        )
+        .eq("list_memberships.on_list", true);
+      if (error) throw error;
+      const rows = (data ?? []) as unknown as ActiveMovieRow[];
+      return rows.map((m) => ({
+        id: m.id,
+        title: m.title,
+        theatricalDate: m.theatrical_date,
+        theatricalRegion: m.theatrical_region,
+        digitalDate: m.digital_date,
+        digitalRegion: m.digital_region,
+      }));
+    },
+  });
+}
+
+interface LogRow {
+  id: number;
+  event: string;
+  medium: string;
+  effective_date: string;
+  sent_at: string | null;
+  movie: { title: string | null } | null;
+}
+
+/**
+ * The visible notification history: sent rows only (seeded rows with a null
+ * sent_at stay hidden, per CONTEXT.md), newest first.
+ */
+export function useNotificationLog() {
+  return useQuery({
+    queryKey: ["notification-log"],
+    queryFn: async (): Promise<LogEntry[]> => {
+      const { data, error } = await supabase
+        .from("notification_log")
+        .select("id, event, medium, effective_date, sent_at, movie:movies(title)")
+        .not("sent_at", "is", null)
+        .order("sent_at", { ascending: false });
+      if (error) throw error;
+      const rows = (data ?? []) as unknown as LogRow[];
+      return rows.map((r) => ({
+        id: r.id,
+        event: r.event as LogEntry["event"],
+        medium: r.medium as LogEntry["medium"],
+        effectiveDate: r.effective_date,
+        sentAt: r.sent_at!,
+        movieTitle: r.movie?.title ?? "Untitled",
+      }));
     },
   });
 }

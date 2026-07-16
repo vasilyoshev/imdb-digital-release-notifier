@@ -7,6 +7,7 @@ import {
 } from "../../lib/dashboard";
 import { useLists, useListMovies } from "../../lib/queries";
 import { MovieList } from "./MovieList";
+import { SideRail } from "./SideRail";
 
 /**
  * The core of the single screen (SPEC §9): a list switcher scoping a status
@@ -101,16 +102,21 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* The table / cards */}
-      {movies.isError ? (
-        <LoadError message={(movies.error as Error).message} />
-      ) : movies.isLoading ? (
-        <div className="grid place-items-center py-16">
-          <span className="loading loading-dots loading-lg text-primary" />
+      {/* The table / cards, with the Upcoming/History rail alongside */}
+      <div className="grid items-start gap-4 lg:grid-cols-[1fr_20rem]">
+        <div>
+          {movies.isError ? (
+            <LoadError message={(movies.error as Error).message} />
+          ) : movies.isLoading ? (
+            <div className="grid place-items-center py-16">
+              <span className="loading loading-dots loading-lg text-primary" />
+            </div>
+          ) : (
+            <MovieList movies={rows} today={today} />
+          )}
         </div>
-      ) : (
-        <MovieList movies={rows} today={today} />
-      )}
+        <SideRail />
+      </div>
     </div>
   );
 }
