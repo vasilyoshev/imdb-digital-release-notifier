@@ -13,16 +13,15 @@
 # testing
 /coverage
 
-# next.js
-/.next/
-/out/
-
-# production
-/build
+# vite
+/dist
 
 # misc
 .DS_Store
 *.pem
+
+# Playwright MCP page snapshots / console logs — capture secrets verbatim, never commit
+.playwright-mcp/
 
 # debug
 npm-debug.log*
@@ -32,10 +31,15 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+!supabase/functions/.env.example
 
 # vercel
 .vercel
 
 # typescript
 *.tsbuildinfo
-next-env.d.ts
+
+# supabase local
+supabase/.temp/
+supabase/functions/.env

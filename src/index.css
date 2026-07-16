@@ -1,0 +1,61 @@
+@import "tailwindcss";
+@plugin "daisyui" {
+  themes: false;
+}
+
+/* "Console" — a cinematic dark theme the whole dashboard inherits.
+   Marquee amber on a near-black projection-booth base. */
+@plugin "daisyui/theme" {
+  name: "console";
+  default: true;
+  color-scheme: dark;
+
+  --color-base-100: #15171e;
+  --color-base-200: #0f1116;
+  --color-base-300: #232631;
+  --color-base-content: #e8e4d9;
+
+  --color-primary: #f2b544;
+  --color-primary-content: #1c1500;
+  --color-secondary: #6b93f2;
+  --color-secondary-content: #05102b;
+  --color-accent: #e0684b;
+  --color-accent-content: #1a0600;
+  --color-neutral: #232631;
+  --color-neutral-content: #cfccc4;
+
+  --color-info: #5b8def;
+  --color-info-content: #04122e;
+  --color-success: #4fb477;
+  --color-success-content: #04150c;
+  --color-warning: #e0a53a;
+  --color-warning-content: #1c1400;
+  --color-error: #e0574f;
+  --color-error-content: #1c0503;
+
+  --radius-selector: 0.4rem;
+  --radius-field: 0.4rem;
+  --radius-box: 0.7rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+}
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+  --font-display: "Bebas Neue", "Inter", sans-serif;
+}
+
+html {
+  font-family: var(--font-sans);
+}
+
+/* The marquee wordmark: tall condensed caps with a touch of tracking. */
+.wordmark {
+  font-family: var(--font-display);
+  letter-spacing: 0.06em;
+  line-height: 0.9;
+}
