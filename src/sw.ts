@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { precacheAndRoute } from "workbox-precaching";
+import { cleanupOutdatedCaches, precacheAndRoute } from "workbox-precaching";
 
 declare const self: ServiceWorkerGlobalScope;
 
@@ -7,3 +7,14 @@ declare const self: ServiceWorkerGlobalScope;
 // always needs the network. The `push` + `notificationclick` handlers, and the
 // install-prompt plumbing, are added in the web-push slice (#35).
 precacheAndRoute(self.__WB_MANIFEST);
+cleanupOutdatedCaches();
+
+// With injectManifest + registerType:"autoUpdate", the custom worker must claim
+// control immediately. Without this a new deploy installs but stays "waiting"
+// and keeps serving the old cached shell until every tab closes — so users see
+// stale content after each release. skipWaiting + clients.claim hand control to
+// the fresh worker on the next load, and the auto-update registration reloads.
+self.skipWaiting();
+self.addEventListener("activate", (event) => {
+  event.waitUntil(self.clients.claim());
+});
