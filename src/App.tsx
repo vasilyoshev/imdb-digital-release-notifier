@@ -1,6 +1,12 @@
+import { lazy, Suspense } from "react";
 import { useAuth } from "./lib/auth-context";
 import { AppShell } from "./components/AppShell";
 import { LoginScreen } from "./components/LoginScreen";
+
+// PROTOTYPE (ticket #42): dev-only ?prototype=radar mount. Delete with src/prototype.
+const RadarPrototype = import.meta.env.DEV
+  ? lazy(() => import("./prototype/radar/RadarPrototype"))
+  : null;
 
 /**
  * The route guard (SPEC §10). One account, one decision: while the session is
@@ -9,6 +15,14 @@ import { LoginScreen } from "./components/LoginScreen";
  */
 export default function App() {
   const { session, loading } = useAuth();
+
+  if (RadarPrototype && new URLSearchParams(window.location.search).get("prototype") === "radar") {
+    return (
+      <Suspense fallback={null}>
+        <RadarPrototype />
+      </Suspense>
+    );
+  }
 
   if (loading) {
     return (
