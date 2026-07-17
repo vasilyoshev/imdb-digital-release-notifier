@@ -8,6 +8,7 @@ import {
   getDeliverableEvents,
   getDeliveredEventIds,
   getDigitalDatesForRegion,
+  getLastUserRefreshAt,
   getLogStates,
   getMemberships,
   getSubscriptions,
@@ -53,6 +54,11 @@ const RADAR_RECENT_DAYS = Number(Deno.env.get("RADAR_RECENT_DAYS") ?? "45");
 const RADAR_UPCOMING_DAYS = Number(Deno.env.get("RADAR_UPCOMING_DAYS") ?? "90");
 const RADAR_FRESH_HOURS = Number(Deno.env.get("RADAR_FRESH_HOURS") ?? "20");
 const RADAR_WINDOWS: RadarWindow[] = ["recent", "upcoming"];
+
+// Per-user Refresh-now (SPEC §8): only re-hydrate the caller's movies staler
+// than this window (near-zero TMDB calls when already fresh), and rate-limit.
+const USER_REFRESH_FRESH_HOURS = Number(Deno.env.get("USER_REFRESH_FRESH_HOURS") ?? "12");
+const USER_REFRESH_RATE_LIMIT_MIN = Number(Deno.env.get("USER_REFRESH_RATE_LIMIT_MIN") ?? "10");
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const isFresh = (refreshedAt: string | null, now: number, ms: number) =>
@@ -223,6 +229,66 @@ async function runRadar(
 
 /** SPEC §8 job 1 — the daily full refresh. Detection only; delivery is the
  * tick's owner shim today and the delivery slice (#56) tomorrow. */
+/** Sync one IMDb watchlist into its memberships (soft, never delete). Newly-seen
+ * titles are inserted and registered in `byImdb`/`movies`. Throws on fetch
+ * failure so callers can isolate per list. */
+async function syncOneWatchlist(
+  db: SupabaseClient,
+  list: { id: number; name: string; config: Record<string, unknown> },
+  byImdb: Map<string, MovieRow>,
+  movies: MovieRow[],
+): Promise<void> {
+  const imdbUserId = String(list.config.imdb_user_id ?? "");
+  if (!imdbUserId) throw new Error(`list ${list.id} (${list.name}) has no imdb_user_id`);
+  const items = await fetchWatchlist(imdbUserId);
+  const wanted = new Set<number>();
+  for (const item of items) {
+    let movie = byImdb.get(item.imdbId);
+    if (!movie) {
+      movie = await insertMovie(db, { imdb_id: item.imdbId, title: item.title, year: item.year });
+      byImdb.set(item.imdbId, movie);
+      movies.push(movie);
+    }
+    wanted.add(movie.id);
+  }
+  const existing = await getMemberships(db, list.id);
+  for (const movieId of wanted) {
+    const prev = existing.find((m) => m.movie_id === movieId);
+    if (!prev || !prev.on_list) await upsertMembership(db, list.id, movieId, true);
+  }
+  for (const prev of existing) {
+    if (prev.on_list && !wanted.has(prev.movie_id)) await upsertMembership(db, list.id, prev.movie_id, false);
+  }
+}
+
+/** Resolve imdb-only active movies to a tmdb id (/find + merge rule), mutating
+ * `activeIds` in place when a merge repoints a stub onto its canonical row. */
+async function resolveActiveIdentities(
+  db: SupabaseClient,
+  movies: MovieRow[],
+  activeIds: Set<number>,
+  tmdbToken: string,
+): Promise<void> {
+  const byTmdb = new Map(movies.filter((m) => m.tmdb_id).map((m) => [m.tmdb_id!, m]));
+  for (const movie of movies) {
+    if (movie.tmdb_id || !movie.imdb_id || !activeIds.has(movie.id)) continue;
+    const tmdbId = await findTmdbId(movie.imdb_id, tmdbToken);
+    if (!tmdbId) continue; // stays Unmatched, retried next run
+    const existing = byTmdb.get(tmdbId);
+    if (existing && existing.id !== movie.id) {
+      await mergeMovies(db, movie.id, existing.id);
+      await updateMovie(db, existing.id, { imdb_id: movie.imdb_id });
+      existing.imdb_id = movie.imdb_id;
+      activeIds.delete(movie.id);
+      activeIds.add(existing.id);
+    } else {
+      await updateMovie(db, movie.id, { tmdb_id: tmdbId });
+      movie.tmdb_id = tmdbId;
+      byTmdb.set(tmdbId, movie);
+    }
+  }
+}
+
 export async function runFull(
   db: SupabaseClient,
   trigger: "cron" | "manual",
@@ -239,7 +305,7 @@ export async function runFull(
     // ---- 1. Sync every sync-enabled IMDb watchlist across all users, staggered,
     //         with per-list failure isolation (one broken list never kills the run).
     const lists = await getAllLists(db);
-    let movies = await getAllMovies(db);
+    const movies = await getAllMovies(db);
     const byImdb = new Map(movies.filter((m) => m.imdb_id).map((m) => [m.imdb_id!, m]));
     const syncFailures: number[] = [];
     let staggered = false;
@@ -248,27 +314,7 @@ export async function runFull(
       if (staggered && SYNC_STAGGER_MS > 0) await sleep(SYNC_STAGGER_MS);
       staggered = true;
       try {
-        const imdbUserId = String(list.config.imdb_user_id ?? "");
-        if (!imdbUserId) throw new Error(`list ${list.id} (${list.name}) has no imdb_user_id`);
-        const items = await fetchWatchlist(imdbUserId);
-        const wanted = new Set<number>();
-        for (const item of items) {
-          let movie = byImdb.get(item.imdbId);
-          if (!movie) {
-            movie = await insertMovie(db, { imdb_id: item.imdbId, title: item.title, year: item.year });
-            byImdb.set(item.imdbId, movie);
-            movies.push(movie);
-          }
-          wanted.add(movie.id);
-        }
-        const existing = await getMemberships(db, list.id);
-        for (const movieId of wanted) {
-          const prev = existing.find((m) => m.movie_id === movieId);
-          if (!prev || !prev.on_list) await upsertMembership(db, list.id, movieId, true);
-        }
-        for (const prev of existing) {
-          if (prev.on_list && !wanted.has(prev.movie_id)) await upsertMembership(db, list.id, prev.movie_id, false);
-        }
+        await syncOneWatchlist(db, list, byImdb, movies);
       } catch (err) {
         syncFailures.push(list.id);
         console.error(`list ${list.id} sync failed (isolated):`, err);
@@ -280,25 +326,7 @@ export async function runFull(
     const activeIds = new Set(memberships.filter((m) => m.on_list).map((m) => m.movie_id));
 
     // ---- 3. Resolve identities for active imdb-only movies (/find + merge rule).
-    movies = await getAllMovies(db);
-    const byTmdb = new Map(movies.filter((m) => m.tmdb_id).map((m) => [m.tmdb_id!, m]));
-    for (const movie of movies) {
-      if (movie.tmdb_id || !movie.imdb_id || !activeIds.has(movie.id)) continue;
-      const tmdbId = await findTmdbId(movie.imdb_id, tmdbToken);
-      if (!tmdbId) continue; // stays Unmatched, retried next run
-      const existing = byTmdb.get(tmdbId);
-      if (existing && existing.id !== movie.id) {
-        await mergeMovies(db, movie.id, existing.id);
-        await updateMovie(db, existing.id, { imdb_id: movie.imdb_id });
-        existing.imdb_id = movie.imdb_id;
-        activeIds.delete(movie.id);
-        activeIds.add(existing.id);
-      } else {
-        await updateMovie(db, movie.id, { tmdb_id: tmdbId });
-        movie.tmdb_id = tmdbId;
-        byTmdb.set(tmdbId, movie);
-      }
-    }
+    await resolveActiveIdentities(db, await getAllMovies(db), activeIds, tmdbToken);
 
     // ---- 4. Hydrate the active+matched union once each, capped oldest-first.
     const all = await getAllMovies(db);
@@ -363,8 +391,101 @@ export async function runFull(
   }
 }
 
-/** SPEC §8 job 2 — the hourly change tick, plus the transition owner-delivery
- * shim (removed when the delivery slice #56 generalizes delivery to all users). */
+/** Seconds the caller must wait before another Refresh-now, or 0 if allowed
+ * (SPEC §8 "~once per 10 min per user"). Checked before a run is opened. */
+export async function checkUserRefreshRate(db: SupabaseClient, userId: string): Promise<number> {
+  const last = await getLastUserRefreshAt(db, userId);
+  if (!last) return 0;
+  const elapsedMs = Date.now() - Date.parse(last);
+  const limitMs = USER_REFRESH_RATE_LIMIT_MIN * 60 * 1000;
+  return elapsedMs >= limitMs ? 0 : Math.ceil((limitMs - elapsedMs) / 1000);
+}
+
+/** SPEC §8 "Refresh-now" — a scoped, rate-limited manual refresh for one user:
+ * sync only their lists, hydrate only their active movies that are stale (shared
+ * cache — usually ~zero TMDB calls), detect events. No radar, no delivery. */
+export async function runUserRefresh(
+  db: SupabaseClient,
+  userId: string,
+  tmdbToken: string,
+  ownerId: string,
+): Promise<Record<string, unknown>> {
+  const runId = await openRun(db, "manual", "user_refresh", userId);
+  try {
+    const regions = await getSupportedRegions(db);
+    const settings = await getAllSettings(db);
+    const globalCascade = buildGlobalCascade(settings.map((s) => s.region_cascade), regions);
+    const today = dateInZone(ownerTimezone(settings, ownerId));
+    const freshMs = USER_REFRESH_FRESH_HOURS * 60 * 60 * 1000;
+    const now = Date.now();
+
+    // ---- 1. Sync only this user's sync-enabled watchlists (per-list isolation).
+    const lists = (await getAllLists(db)).filter((l) => l.user_id === userId);
+    const movies = await getAllMovies(db);
+    const byImdb = new Map(movies.filter((m) => m.imdb_id).map((m) => [m.imdb_id!, m]));
+    for (const list of lists) {
+      if (list.kind !== "imdb_watchlist" || !list.sync_enabled) continue;
+      try {
+        await syncOneWatchlist(db, list, byImdb, movies);
+      } catch (err) {
+        console.error(`user_refresh list ${list.id} sync failed (isolated):`, err);
+      }
+    }
+
+    // ---- 2. This user's active movies, then resolve their imdb-only identities.
+    const memberships = await getAllMemberships(db);
+    const activeIds = new Set(
+      memberships.filter((m) => m.user_id === userId && m.on_list).map((m) => m.movie_id),
+    );
+    await resolveActiveIdentities(db, await getAllMovies(db), activeIds, tmdbToken);
+
+    // ---- 3. Hydrate only this user's active movies that are stale (shared cache).
+    const all = await getAllMovies(db);
+    const knownImdbIds = new Set(all.filter((m) => m.imdb_id).map((m) => m.imdb_id!));
+    const activeMatched = all.filter((m) => activeIds.has(m.id) && m.tmdb_id);
+    const logStates = await getLogStates(db);
+
+    let matched = 0;
+    let fetchFailures = 0;
+    const eventRows: EventRow[] = [];
+    const refreshedNewMovieIds: number[] = [];
+    for (const movie of activeMatched) {
+      if (isFresh(movie.refreshed_at, now, freshMs)) continue; // shared-cache: already fresh
+      const res = await hydrateAndDetect(db, movie, tmdbToken, regions, globalCascade, logStates, today, knownImdbIds);
+      if (!res.ok) {
+        fetchFailures++;
+        continue;
+      }
+      matched++;
+      if (res.isNew) refreshedNewMovieIds.push(movie.id);
+      eventRows.push(...res.events);
+    }
+    await insertEventRows(db, eventRows);
+    await markFirstRefreshed(db, refreshedNewMovieIds);
+
+    await closeRun(db, runId, {
+      status: "success",
+      movies_total: activeIds.size,
+      movies_matched: matched,
+      events_created: eventRows.length,
+      notifications_sent: 0,
+      movies_deferred: fetchFailures,
+    });
+    return {
+      runId,
+      job: "user_refresh",
+      userId,
+      moviesTotal: activeIds.size,
+      moviesMatched: matched,
+      eventsCreated: eventRows.length,
+    };
+  } catch (err) {
+    await closeRunSafe(db, runId, err);
+    throw err;
+  }
+}
+
+/** SPEC §8 job 2 — the hourly change tick. */
 export async function runTick(
   db: SupabaseClient,
   trigger: "cron" | "manual",
@@ -375,12 +496,12 @@ export async function runTick(
   try {
     const regions = await getSupportedRegions(db);
     const settings = await getAllSettings(db);
-    const ownerSettings = settings.find((s) => s.user_id === ownerId) ?? null;
-    const ownerTZ = ownerSettings?.timezone ?? "UTC";
+    const ownerTZ = ownerTimezone(settings, ownerId);
     const globalCascade = buildGlobalCascade(settings.map((s) => s.region_cascade), regions);
     const today = dateInZone(ownerTZ);
 
-    // ---- 1. Re-hydrate tracked movies TMDb reports changed in the last day.
+    // Re-hydrate tracked movies TMDb reports changed in the last day; append any
+    // resulting events. Delivery is the delivery job's own concern (§8 job 3).
     const memberships = await getAllMemberships(db);
     const activeIds = new Set(memberships.filter((m) => m.on_list).map((m) => m.movie_id));
     const movies = await getAllMovies(db);
@@ -404,19 +525,12 @@ export async function runTick(
     await insertEventRows(db, eventRows);
     await markFirstRefreshed(db, refreshedNewMovieIds);
 
-    // ---- 2. Transition shim: owner delivery at the owner's local gate hour.
-    let notificationsSent = 0;
-    if (ownerSettings && hourInZone(ownerTZ) === ownerSettings.notify_hour) {
-      const movieById = new Map(movies.map((m) => [m.id, m]));
-      notificationsSent = await deliverOwner(db, ownerId, ownerSettings, memberships, movieById);
-    }
-
     await closeRun(db, runId, {
       status: "success",
       movies_total: toRefresh.length,
       movies_matched: matched,
       events_created: eventRows.length,
-      notifications_sent: notificationsSent,
+      notifications_sent: 0,
     });
     return {
       runId,
@@ -424,7 +538,6 @@ export async function runTick(
       moviesChanged: toRefresh.length,
       moviesMatched: matched,
       eventsCreated: eventRows.length,
-      notificationsSent,
     };
   } catch (err) {
     await closeRunSafe(db, runId, err);
@@ -432,30 +545,62 @@ export async function runTick(
   }
 }
 
-/** Owner-only delivery (SPEC §9). Temporary: the delivery slice (#56) replaces
- * this with the per-timezone job that serves every user. */
-async function deliverOwner(
+/** SPEC §8 job 3 — the hourly per-user delivery job. Delivers to every user
+ * whose local gate hour is now; push for all, email digest for the owner only. */
+export async function runDelivery(
   db: SupabaseClient,
+  trigger: "cron" | "manual",
   ownerId: string,
-  ownerSettings: Settings,
+): Promise<Record<string, unknown>> {
+  const runId = await openRun(db, trigger, "delivery");
+  try {
+    const settings = await getAllSettings(db);
+    const memberships = await getAllMemberships(db);
+    const movies = await getAllMovies(db);
+    const movieById = new Map(movies.map((m) => [m.id, m]));
+
+    let usersDelivered = 0;
+    let notificationsSent = 0;
+    for (const s of settings) {
+      if (hourInZone(s.timezone) !== s.notify_hour) continue; // not this user's gate hour
+      const sent = await deliverUser(db, s, s.user_id === ownerId, memberships, movieById);
+      if (sent > 0) usersDelivered++;
+      notificationsSent += sent;
+    }
+
+    await closeRun(db, runId, { status: "success", notifications_sent: notificationsSent });
+    return { runId, job: "delivery", usersDelivered, notificationsSent };
+  } catch (err) {
+    await closeRunSafe(db, runId, err);
+    throw err;
+  }
+}
+
+/** Deliver one user's due events (SPEC §9). Push for everyone; email digest for
+ * the owner only. Returns the number of events delivered on any channel. */
+async function deliverUser(
+  db: SupabaseClient,
+  settings: Settings,
+  isOwner: boolean,
   memberships: MembershipRow[],
   movieById: Map<number, MovieRow>,
 ): Promise<number> {
-  // Movies the owner follows on a notifications-enabled list → earliest added_at.
+  const userId = settings.user_id;
+  // Movies the user follows on a notifications-enabled list → earliest added_at.
   const followedSince = new Map<number, string>();
   for (const m of memberships) {
-    if (m.user_id !== ownerId || !m.on_list || !m.notifications_enabled) continue;
+    if (m.user_id !== userId || !m.on_list || !m.notifications_enabled) continue;
     const prev = followedSince.get(m.movie_id);
     if (prev === undefined || m.added_at < prev) followedSince.set(m.movie_id, m.added_at);
   }
   const events = await getDeliverableEvents(db, [...followedSince.keys()]);
-  const delivered = await getDeliveredEventIds(db, ownerId);
+  const delivered = await getDeliveredEventIds(db, userId);
   const sendIds = new Set(
     selectDeliveries(
       events.map((e) => ({ id: e.id, movie_id: e.movie_id, created_at: e.created_at })),
       followedSince,
       delivered,
-      ownerSettings.notifications_paused,
+      settings.notifications_paused,
     ),
   );
   const toSend = events.filter((e) => sendIds.has(e.id));
@@ -476,24 +621,24 @@ async function deliverOwner(
   // Email digest — owner only, honored only when configured.
   const resendKey = Deno.env.get("RESEND_API_KEY");
   const emailSent: number[] = [];
-  if (resendKey && ownerSettings.notify_email) {
+  if (isOwner && resendKey && settings.notify_email) {
     try {
       const digest = buildDigest(digestEvents, appUrl);
       if (digest) {
-        await sendDigest(resendKey, Deno.env.get("NOTIFY_FROM") ?? "onboarding@resend.dev", ownerSettings.notify_email, digest);
+        await sendDigest(resendKey, Deno.env.get("NOTIFY_FROM") ?? "onboarding@resend.dev", settings.notify_email, digest);
         emailSent.push(...toSend.map((e) => e.id));
       }
     } catch (err) {
-      console.error("email digest failed:", err);
+      console.error(`email digest failed for ${userId}:`, err);
     }
   }
 
-  // Web push — one notification per event.
+  // Web push — one notification per event, all users.
   const vapid = Deno.env.get("VAPID_KEYS_JSON");
   const pushSent: number[] = [];
   if (vapid) {
     try {
-      const subs = await getSubscriptions(db, ownerId);
+      const subs = await getSubscriptions(db, userId);
       if (subs.length) {
         const messages: PushMessage[] = digestEvents.map((e) => ({
           title: e.event === "released"
@@ -509,12 +654,12 @@ async function deliverOwner(
         pushSent.push(...toSend.map((e) => e.id));
       }
     } catch (err) {
-      console.error("push delivery failed:", err);
+      console.error(`push delivery failed for ${userId}:`, err);
     }
   }
 
-  await insertDeliveries(db, ownerId, emailSent, "email");
-  await insertDeliveries(db, ownerId, pushSent, "push");
+  await insertDeliveries(db, userId, emailSent, "email");
+  await insertDeliveries(db, userId, pushSent, "push");
   // An event counts as delivered if it went out on any channel.
   return new Set([...emailSent, ...pushSent]).size;
 }

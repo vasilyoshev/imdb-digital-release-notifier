@@ -143,6 +143,17 @@ export async function closeRun(
   );
 }
 
+/** When this user last ran a Refresh-now — the rate-limit clock (SPEC §8). */
+export async function getLastUserRefreshAt(db: SupabaseClient, userId: string): Promise<string | null> {
+  const rows = unwrap<{ started_at: string }[]>(
+    await db.from("refresh_runs").select("started_at")
+      .eq("job", "user_refresh").eq("user_id", userId)
+      .order("started_at", { ascending: false }).limit(1),
+    "getLastUserRefreshAt",
+  );
+  return rows[0]?.started_at ?? null;
+}
+
 export async function getAllMovies(db: SupabaseClient): Promise<MovieRow[]> {
   return unwrap(await db.from("movies").select(MOVIE_COLS), "getAllMovies");
 }
