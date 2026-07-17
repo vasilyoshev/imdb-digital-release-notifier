@@ -64,6 +64,70 @@ export async function getOwnerId(db: SupabaseClient): Promise<string> {
   return row.user_id;
 }
 
+/** Fixed-window per-user rate limit (SPEC §11). Returns true when allowed. */
+export async function checkRateLimit(
+  db: SupabaseClient,
+  userId: string,
+  action: string,
+  limit: number,
+  windowSeconds: number,
+): Promise<boolean> {
+  const { data, error } = await db.rpc("check_rate_limit", {
+    p_user: userId,
+    p_action: action,
+    p_limit: limit,
+    p_window_seconds: windowSeconds,
+  });
+  if (error) throw new Error(`db checkRateLimit: ${error.message}`);
+  return data === true;
+}
+
+/** The user's auto-provisioned Followed list (SPEC §5b) — the manual list. */
+export async function getUserFollowedList(db: SupabaseClient, userId: string): Promise<{ id: number } | null> {
+  const rows = unwrap<{ id: number }[]>(
+    await db.from("lists").select("id").eq("user_id", userId).eq("kind", "manual").order("position").limit(1),
+    "getUserFollowedList",
+  );
+  return rows[0] ?? null;
+}
+
+export async function getMovieByTmdbId(db: SupabaseClient, tmdbId: number): Promise<MovieRow | null> {
+  const rows = unwrap<MovieRow[]>(
+    await db.from("movies").select(MOVIE_COLS).eq("tmdb_id", tmdbId).limit(1),
+    "getMovieByTmdbId",
+  );
+  return rows[0] ?? null;
+}
+
+/** All imdb ids currently in the movies table — the identity-dedup set. */
+export async function getKnownImdbIds(db: SupabaseClient): Promise<Set<string>> {
+  const rows = unwrap<{ imdb_id: string }[]>(
+    await db.from("movies").select("imdb_id").not("imdb_id", "is", null),
+    "getKnownImdbIds",
+  );
+  return new Set(rows.map((r) => r.imdb_id));
+}
+
+/** tmdb ids + digital dates of the movies a user follows — the search "already
+ * tracked" markers. */
+export async function getUserTrackedMovies(
+  db: SupabaseClient,
+  userId: string,
+): Promise<Map<number, string | null>> {
+  const { data, error } = await db.from("list_memberships")
+    .select("movie:movies!inner(tmdb_id, digital_date), lists!inner(user_id)")
+    .eq("on_list", true).eq("lists.user_id", userId);
+  if (error) throw new Error(`db getUserTrackedMovies: ${error.message}`);
+  const rows = (data ?? []) as unknown as {
+    movie: { tmdb_id: number | null; digital_date: string | null } | null;
+  }[];
+  const map = new Map<number, string | null>();
+  for (const r of rows) {
+    if (r.movie?.tmdb_id != null) map.set(r.movie.tmdb_id, r.movie.digital_date);
+  }
+  return map;
+}
+
 /** Curated supported regions (SPEC §4), in cascade-priority position order. */
 export async function getSupportedRegions(db: SupabaseClient): Promise<string[]> {
   const rows = unwrap<{ region: string }[]>(

@@ -76,7 +76,7 @@ interface EventRow {
  * metadata (genres, trailer), and the global-cascade effective dates. Mutates
  * the in-memory `movie` (refreshed_at, imdb backfill) so the shared cache stays
  * consistent within a run. Returns the effective date per medium for detection. */
-async function applyBundle(
+export async function applyBundle(
   db: SupabaseClient,
   movie: MovieRow,
   bundle: NonNullable<Awaited<ReturnType<typeof fetchMovieBundle>>>,

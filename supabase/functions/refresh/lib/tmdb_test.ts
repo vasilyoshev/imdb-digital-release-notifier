@@ -8,6 +8,7 @@ import {
   fetchDiscover,
   fetchMovieBundle,
   findTmdbId,
+  searchMovies,
 } from "./tmdb.ts";
 
 Deno.test("extractRawDates keeps BG/US/GB, maps type 3/4, earliest wins, ignores others", () => {
@@ -104,6 +105,25 @@ Deno.test("fetchMovieBundle bundles videos+genres and honors regions", async () 
   assertEquals(bundle?.genres, ["Drama"]);
   assertEquals(bundle?.trailerKey, "yt1");
   assertEquals(bundle?.rawDates, [{ region: "DE", medium: "digital", date: "2026-05-01" }]);
+});
+
+Deno.test("searchMovies trims, maps fields, respects limit", async () => {
+  const urls: string[] = [];
+  const fakeFetch = ((url: unknown) => {
+    urls.push(String(url));
+    return Promise.resolve(new Response(JSON.stringify({
+      results: Array.from({ length: 20 }, (_, i) => ({
+        id: i, title: `M${i}`, release_date: i === 0 ? "2025-06-01" : "", poster_path: i === 0 ? "/p.png" : null, overview: i === 0 ? "o" : "",
+      })),
+    })));
+  }) as typeof fetch;
+  const hits = await searchMovies("  dune  ", "tok", fakeFetch, 5);
+  assertEquals(urls[0].includes("query=dune"), true);
+  assertEquals(hits.length, 5);
+  assertEquals(hits[0], { tmdbId: 0, title: "M0", year: 2025, posterPath: "/p.png", overview: "o" });
+  assertEquals(hits[1].year, null);
+  assertEquals(hits[1].overview, null);
+  assertEquals(await searchMovies("   ", "tok", fakeFetch), []);
 });
 
 Deno.test("fetchChanges paginates and collects ids", async () => {

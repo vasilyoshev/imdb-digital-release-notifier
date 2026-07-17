@@ -1,6 +1,7 @@
 import { useAuth } from "../lib/auth-context";
 import { useLastRun, useRefreshNow } from "../lib/queries";
 import { Mark } from "./Mark";
+import { NavbarSearch } from "./NavbarSearch";
 
 function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("en-GB", {
@@ -47,6 +48,7 @@ export function Navbar({ onOpenSettings }: { onOpenSettings?: () => void }) {
       </div>
 
       <div className="flex flex-none items-center gap-2">
+        <NavbarSearch />
         <button
           className="btn btn-sm btn-outline btn-primary"
           onClick={() => refresh.mutate()}
