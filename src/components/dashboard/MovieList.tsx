@@ -1,11 +1,23 @@
 import { statusOf, type Movie } from "../../lib/dashboard";
+import type { SortKey, SortState } from "../../lib/table-controls";
 import { DateCell, Poster, ProviderChip, StatusBadge } from "./atoms";
 
 /**
- * The dense watchlist table (SPEC §9). On md+ it's a real table; on mobile it
- * collapses to stacked cards — same data, no separate mobile navigation.
+ * The dense watchlist table (SPEC §9). On md+ it's a real table with clickable
+ * sortable headers; on mobile it collapses to stacked cards (sorted via the
+ * toolbar's "Sort by…" control) — same data, no separate mobile navigation.
  */
-export function MovieList({ movies, today }: { movies: Movie[]; today: string }) {
+export function MovieList({
+  movies,
+  today,
+  sort,
+  onToggleSort,
+}: {
+  movies: Movie[];
+  today: string;
+  sort: SortState;
+  onToggleSort: (key: SortKey) => void;
+}) {
   if (movies.length === 0) {
     return (
       <div className="card border border-base-300 bg-base-100">
@@ -23,10 +35,10 @@ export function MovieList({ movies, today }: { movies: Movie[]; today: string })
         <table className="table table-sm">
           <thead>
             <tr>
-              <th>Movie</th>
-              <th>Status</th>
-              <th>Theatrical</th>
-              <th>Digital</th>
+              <SortableTh label="Movie" sortKey="title" sort={sort} onToggle={onToggleSort} />
+              <SortableTh label="Status" sortKey="status" sort={sort} onToggle={onToggleSort} />
+              <SortableTh label="Theatrical" sortKey="theatrical" sort={sort} onToggle={onToggleSort} />
+              <SortableTh label="Digital" sortKey="digital" sort={sort} onToggle={onToggleSort} />
               <th>Where to watch (BG)</th>
             </tr>
           </thead>
@@ -100,6 +112,34 @@ export function MovieList({ movies, today }: { movies: Movie[]; today: string })
         ))}
       </div>
     </>
+  );
+}
+
+function SortableTh({
+  label,
+  sortKey,
+  sort,
+  onToggle,
+}: {
+  label: string;
+  sortKey: SortKey;
+  sort: SortState;
+  onToggle: (key: SortKey) => void;
+}) {
+  const active = sort.key === sortKey;
+  return (
+    <th>
+      <button
+        className="flex items-center gap-1 hover:text-base-content"
+        aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
+        onClick={() => onToggle(sortKey)}
+      >
+        {label}
+        <span className={`text-xs ${active ? "opacity-100" : "opacity-30"}`}>
+          {active ? (sort.dir === "asc" ? "↑" : "↓") : "↕"}
+        </span>
+      </button>
+    </th>
   );
 }
 

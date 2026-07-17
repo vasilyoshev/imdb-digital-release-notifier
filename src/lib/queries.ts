@@ -49,6 +49,7 @@ interface MembershipRow {
     title: string | null;
     year: number | null;
     poster_path: string | null;
+    genres: string[] | null;
     theatrical_date: string | null;
     theatrical_region: string | null;
     digital_date: string | null;
@@ -76,7 +77,7 @@ export function useListMovies(listId: number | undefined) {
         .from("list_memberships")
         .select(
           `movie:movies!inner(
-            id, imdb_id, tmdb_id, title, year, poster_path,
+            id, imdb_id, tmdb_id, title, year, poster_path, genres,
             theatrical_date, theatrical_region, digital_date, digital_region,
             watch_providers(region, provider_name, offer_type, display_priority)
           )`,
@@ -96,6 +97,7 @@ export function useListMovies(listId: number | undefined) {
           title: m.title,
           year: m.year,
           posterPath: m.poster_path,
+          genres: m.genres ?? [],
           theatricalDate: m.theatrical_date,
           theatricalRegion: m.theatrical_region,
           digitalDate: m.digital_date,
