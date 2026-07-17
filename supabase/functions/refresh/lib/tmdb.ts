@@ -10,6 +10,9 @@ const ALLOWED_FILTERS = [
   "sort_by", "vote_count.gte", "vote_average.gte", "with_genres", "without_genres",
   "primary_release_date.gte", "primary_release_date.lte", "with_original_language",
   "region", "with_release_type",
+  // Regional release-window filters — with `region` + `with_release_type`, these
+  // bound the radar's per-region digital-release window (SPEC §4).
+  "release_date.gte", "release_date.lte",
 ];
 
 // deno-lint-ignore no-explicit-any
