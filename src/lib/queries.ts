@@ -108,6 +108,64 @@ export function useListMovies(listId: number | undefined) {
   });
 }
 
+// ---- Search & follow (SPEC §11) ---------------------------------------
+
+export interface SearchHit {
+  tmdbId: number;
+  title: string;
+  year: number | null;
+  posterPath: string | null;
+  overview: string | null;
+  tracked: boolean;
+  digitalDate: string | null;
+}
+
+/** TMDb search via the `search` edge function (bearer stays server-side). */
+export function useSearch() {
+  return useMutation({
+    mutationFn: async (q: string): Promise<SearchHit[]> => {
+      const { data, error } = await supabase.functions.invoke("search", { body: { q } });
+      if (error) throw error;
+      const payload = data as { results?: SearchHit[]; error?: string } | null;
+      if (payload?.error) throw new Error(payload.error);
+      return payload?.results ?? [];
+    },
+  });
+}
+
+/** Follow / unfollow a movie via the `follow` edge function; refetch everything
+ * so the Followed list, table, and detail panel reflect the change. */
+export function useFollow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ tmdbId, action }: { tmdbId: number; action: "follow" | "unfollow" }) => {
+      const { data, error } = await supabase.functions.invoke("follow", { body: { tmdbId, action } });
+      if (error) throw error;
+      const payload = data as { error?: string } | null;
+      if (payload?.error) throw new Error(payload.error);
+      return payload;
+    },
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+/** The movie ids the user currently follows (their manual Followed list) — RLS
+ * scopes to the caller, so this drives the panel's Follow/Unfollow state. */
+export function useFollowedIds() {
+  return useQuery({
+    queryKey: ["followed-ids"],
+    queryFn: async (): Promise<number[]> => {
+      const { data, error } = await supabase
+        .from("list_memberships")
+        .select("movie_id, lists!inner(kind)")
+        .eq("on_list", true)
+        .eq("lists.kind", "manual");
+      if (error) throw error;
+      return ((data ?? []) as unknown as { movie_id: number }[]).map((r) => r.movie_id);
+    },
+  });
+}
+
 export interface MovieDetail {
   id: number;
   title: string | null;

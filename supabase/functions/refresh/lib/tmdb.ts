@@ -41,6 +41,38 @@ export async function findTmdbId(
   return json?.movie_results?.[0]?.id ?? null;
 }
 
+export interface SearchResult {
+  tmdbId: number;
+  title: string;
+  year: number | null;
+  posterPath: string | null;
+  overview: string | null;
+}
+
+/** TMDb movie search — proxied by the `search` edge function so the bearer never
+ * ships to the browser (SPEC §11). Returns up to `limit` most-relevant movies. */
+export async function searchMovies(
+  query: string,
+  token: string,
+  fetchFn: typeof fetch = fetch,
+  limit = 12,
+): Promise<SearchResult[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const json = await tmdbGet(
+    `/search/movie?include_adult=false&query=${encodeURIComponent(q)}`,
+    token,
+    fetchFn,
+  );
+  return (json?.results ?? []).slice(0, limit).map((r: Record<string, unknown>) => ({
+    tmdbId: r.id as number,
+    title: (r.title as string) ?? "",
+    year: r.release_date ? Number(String(r.release_date).slice(0, 4)) : null,
+    posterPath: (r.poster_path as string) ?? null,
+    overview: (r.overview as string) || null,
+  }));
+}
+
 // deno-lint-ignore no-explicit-any
 export function extractRawDates(releaseDates: any, regions: string[] = REGIONS): RawDate[] {
   const out: RawDate[] = [];

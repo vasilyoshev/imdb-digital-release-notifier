@@ -1,5 +1,5 @@
 import { fmtFull, toProviders, todayISO } from "../../lib/dashboard";
-import { useMovieDetail } from "../../lib/queries";
+import { useFollow, useFollowedIds, useMovieDetail } from "../../lib/queries";
 import { ProviderChip } from "./atoms";
 
 const TMDB_IMG = "https://image.tmdb.org/t/p/w342";
@@ -22,8 +22,11 @@ export function MovieDetailPanel({
   isAuthenticated: boolean;
 }) {
   const detail = useMovieDetail(movieId);
+  const followedIds = useFollowedIds();
+  const follow = useFollow();
   if (movieId == null) return null;
   const m = detail.data;
+  const isFollowed = (followedIds.data ?? []).includes(movieId);
 
   return (
     <>
@@ -90,13 +93,25 @@ export function MovieDetailPanel({
 
               <Providers rawProviders={m.rawProviders} activeRegion={activeRegion} />
 
-              {isAuthenticated ? (
-                <button className="btn btn-primary btn-block" disabled>
-                  Follow — coming soon
-                </button>
-              ) : (
+              {!isAuthenticated ? (
                 <button className="btn btn-primary btn-block" onClick={onClose}>
                   Sign in to follow
+                </button>
+              ) : (
+                <button
+                  className={`btn btn-block ${isFollowed ? "btn-outline" : "btn-primary"}`}
+                  disabled={follow.isPending || m.tmdbId == null}
+                  onClick={() =>
+                    m.tmdbId != null &&
+                    follow.mutate({ tmdbId: m.tmdbId, action: isFollowed ? "unfollow" : "follow" })}
+                >
+                  {follow.isPending ? (
+                    <span className="loading loading-spinner loading-xs" />
+                  ) : isFollowed ? (
+                    "✓ Following — unfollow"
+                  ) : (
+                    "Follow"
+                  )}
                 </button>
               )}
             </>
