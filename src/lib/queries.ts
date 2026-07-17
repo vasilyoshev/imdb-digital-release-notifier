@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "./supabase";
-import { toProvidersBG, type List, type Movie } from "./dashboard";
+import { type RawProvider, toProvidersBG, type List, type Movie } from "./dashboard";
 import type { ActiveMovie, LogEntry } from "./rail";
 import type { RefreshRun, RefreshSummary, Settings, PushDevice } from "./settings";
 import { subscribeThisDevice } from "./push";
@@ -104,6 +104,70 @@ export function useListMovies(listId: number | undefined) {
           digitalRegion: m.digital_region,
           providersBG: toProvidersBG(m.watch_providers),
         }));
+    },
+  });
+}
+
+export interface MovieDetail {
+  id: number;
+  title: string | null;
+  year: number | null;
+  posterPath: string | null;
+  overview: string | null;
+  trailerKey: string | null;
+  tmdbId: number | null;
+  releaseDates: { region: string; medium: "theatrical" | "digital"; releaseDate: string }[];
+  rawProviders: RawProvider[];
+}
+
+interface MovieDetailRow {
+  id: number;
+  title: string | null;
+  year: number | null;
+  poster_path: string | null;
+  overview: string | null;
+  trailer_key: string | null;
+  tmdb_id: number | null;
+  release_dates: { region: string; medium: "theatrical" | "digital"; release_date: string }[];
+  watch_providers: RawProvider[];
+}
+
+/**
+ * One movie's full detail for the side panel (SPEC §10): synopsis, trailer key,
+ * every region's raw release dates (the cross-region matrix), and providers for
+ * all regions. Global tables — anon-readable — so this works signed out too.
+ */
+export function useMovieDetail(movieId: number | null) {
+  return useQuery({
+    queryKey: ["movie-detail", movieId],
+    enabled: movieId != null,
+    queryFn: async (): Promise<MovieDetail> => {
+      const { data, error } = await supabase
+        .from("movies")
+        .select(
+          `id, title, year, poster_path, overview, trailer_key, tmdb_id,
+           release_dates(region, medium, release_date),
+           watch_providers(region, provider_name, offer_type, display_priority)`,
+        )
+        .eq("id", movieId!)
+        .single();
+      if (error) throw error;
+      const m = data as unknown as MovieDetailRow;
+      return {
+        id: m.id,
+        title: m.title,
+        year: m.year,
+        posterPath: m.poster_path,
+        overview: m.overview,
+        trailerKey: m.trailer_key,
+        tmdbId: m.tmdb_id,
+        releaseDates: (m.release_dates ?? []).map((r) => ({
+          region: r.region,
+          medium: r.medium,
+          releaseDate: r.release_date,
+        })),
+        rawProviders: m.watch_providers ?? [],
+      };
     },
   });
 }

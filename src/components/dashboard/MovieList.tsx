@@ -12,11 +12,13 @@ export function MovieList({
   today,
   sort,
   onToggleSort,
+  onSelect,
 }: {
   movies: Movie[];
   today: string;
   sort: SortState;
   onToggleSort: (key: SortKey) => void;
+  onSelect: (movieId: number) => void;
 }) {
   if (movies.length === 0) {
     return (
@@ -44,7 +46,11 @@ export function MovieList({
           </thead>
           <tbody>
             {movies.map((m) => (
-              <tr key={m.id}>
+              <tr
+                key={m.id}
+                className="cursor-pointer hover:bg-base-200"
+                onClick={() => onSelect(m.id)}
+              >
                 <td>
                   <div className="flex items-center gap-3">
                     <Poster movie={m} className="w-8 shrink-0" />
@@ -77,7 +83,8 @@ export function MovieList({
         {movies.map((m) => (
           <div
             key={m.id}
-            className="card border border-base-300 bg-base-100 shadow-sm"
+            className="card cursor-pointer border border-base-300 bg-base-100 shadow-sm active:bg-base-200"
+            onClick={() => onSelect(m.id)}
           >
             <div className="card-body flex-row gap-3 p-3">
               <Poster movie={m} className="w-14 shrink-0" />

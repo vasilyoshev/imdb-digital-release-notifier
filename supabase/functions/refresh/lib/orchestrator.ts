@@ -88,6 +88,7 @@ async function applyBundle(
     title: bundle.title ?? movie.title,
     year: bundle.year ?? movie.year,
     poster_path: bundle.posterPath ?? movie.poster_path,
+    overview: bundle.overview,
     genres: bundle.genres,
     trailer_key: bundle.trailerKey,
     refreshed_at: nowIso,
