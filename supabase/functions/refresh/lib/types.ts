@@ -39,6 +39,10 @@ export interface MovieBundle {
   year: number | null;
   posterPath: string | null;
   imdbId: string | null;
+  /** Genre names from the same bundle call (SPEC §6, zero extra HTTP). */
+  genres: string[];
+  /** YouTube key of the movie's trailer, or null — rides append_to_response=videos. */
+  trailerKey: string | null;
   rawDates: RawDate[];
   providers: ProviderRow[];
 }
