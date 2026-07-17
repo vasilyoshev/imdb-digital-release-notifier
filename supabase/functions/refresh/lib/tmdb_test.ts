@@ -89,6 +89,7 @@ Deno.test("fetchMovieBundle bundles videos+genres and honors regions", async () 
     urls.push(String(url));
     return Promise.resolve(new Response(JSON.stringify({
       title: "M", release_date: "2026-02-03", poster_path: "/p.png",
+      overview: "A synopsis.",
       genres: [{ id: 18, name: "Drama" }],
       external_ids: { imdb_id: "tt1" },
       videos: { results: [{ site: "YouTube", type: "Trailer", key: "yt1", official: true }] },
@@ -99,6 +100,7 @@ Deno.test("fetchMovieBundle bundles videos+genres and honors regions", async () 
 
   const bundle = await fetchMovieBundle(1, "tok", fakeFetch, ["DE"]);
   assertEquals(urls[0].includes("append_to_response=release_dates,watch/providers,external_ids,videos"), true);
+  assertEquals(bundle?.overview, "A synopsis.");
   assertEquals(bundle?.genres, ["Drama"]);
   assertEquals(bundle?.trailerKey, "yt1");
   assertEquals(bundle?.rawDates, [{ region: "DE", medium: "digital", date: "2026-05-01" }]);

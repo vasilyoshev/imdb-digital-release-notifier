@@ -124,6 +124,7 @@ export async function fetchMovieBundle(
     year: json.release_date ? Number(String(json.release_date).slice(0, 4)) : null,
     posterPath: json.poster_path ?? null,
     imdbId: json.external_ids?.imdb_id || null,
+    overview: json.overview || null,
     genres: extractGenres(json),
     trailerKey: extractTrailerKey(json),
     rawDates: extractRawDates(json.release_dates, regions),

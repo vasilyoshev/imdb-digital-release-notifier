@@ -16,6 +16,7 @@ import {
 } from "../../lib/table-controls";
 import { useLists, useListMovies } from "../../lib/queries";
 import { FilterToolbar } from "./FilterToolbar";
+import { MovieDetailPanel } from "./MovieDetailPanel";
 import { MovieList } from "./MovieList";
 import { SideRail } from "./SideRail";
 
@@ -29,6 +30,7 @@ export function Dashboard() {
   const [activeList, setActiveList] = useState<number | null>(null);
   const [filter, setFilter] = useState<DerivedStatus | null>(null);
   const [controls, setControls] = useState<TableControls>(defaultControls);
+  const [selectedMovieId, setSelectedMovieId] = useState<number | null>(null);
 
   // Default to the first list once they load.
   const listId = activeList ?? lists.data?.[0]?.id;
@@ -143,11 +145,19 @@ export function Dashboard() {
               today={today}
               sort={controls.sort}
               onToggleSort={(key) => updateControls({ ...controls, sort: toggleSort(controls.sort, key) })}
+              onSelect={setSelectedMovieId}
             />
           )}
         </div>
         <SideRail />
       </div>
+
+      <MovieDetailPanel
+        movieId={selectedMovieId}
+        onClose={() => setSelectedMovieId(null)}
+        activeRegion="BG"
+        isAuthenticated
+      />
     </div>
   );
 }
