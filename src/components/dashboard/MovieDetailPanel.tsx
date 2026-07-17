@@ -22,7 +22,7 @@ export function MovieDetailPanel({
   isAuthenticated: boolean;
 }) {
   const detail = useMovieDetail(movieId);
-  const followedIds = useFollowedIds();
+  const followedIds = useFollowedIds(isAuthenticated);
   const follow = useFollow();
   if (movieId == null) return null;
   const m = detail.data;

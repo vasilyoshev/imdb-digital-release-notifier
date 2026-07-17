@@ -16,7 +16,7 @@ export function AttributionLine() {
       >
         TMDB
       </a>{" "}
-      API but is not endorsed or certified by TMDB. Streaming availability by{" "}
+      API but is not endorsed, certified, or otherwise approved by TMDB. Streaming availability by{" "}
       <a
         href="https://www.justwatch.com/"
         target="_blank"

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "./supabase";
-import { type RawProvider, toProvidersBG, type List, type Movie } from "./dashboard";
+import { type RawProvider, toProviders, toProvidersBG, type List, type Movie } from "./dashboard";
 import type { ActiveMovie, LogEntry } from "./rail";
 import type { RefreshRun, RefreshSummary, Settings, PushDevice } from "./settings";
 import { subscribeThisDevice } from "./push";
@@ -15,10 +15,12 @@ interface ListRow {
   config: Record<string, unknown>;
 }
 
-/** The lists that drive the switcher and settings, ordered by position. */
-export function useLists() {
+/** The lists that drive the switcher and settings, ordered by position
+ * (signed-in only — lists are RLS-scoped to the owner). */
+export function useLists(enabled = true) {
   return useQuery({
     queryKey: ["lists"],
+    enabled,
     queryFn: async (): Promise<List[]> => {
       const { data, error } = await supabase
         .from("lists")
@@ -108,6 +110,74 @@ export function useListMovies(listId: number | undefined) {
   });
 }
 
+// ---- Digital Release Radar (SPEC §4) ----------------------------------
+
+/** The curated supported regions for the navbar region select (anon-readable). */
+export function useSupportedRegions() {
+  return useQuery({
+    queryKey: ["supported-regions"],
+    queryFn: async (): Promise<{ region: string; name: string }[]> => {
+      const { data, error } = await supabase
+        .from("supported_regions")
+        .select("region, name")
+        .order("position");
+      if (error) throw error;
+      return (data ?? []) as { region: string; name: string }[];
+    },
+    staleTime: Infinity,
+  });
+}
+
+interface RadarRow {
+  rank: number;
+  movie: MembershipRow["movie"];
+}
+
+/**
+ * The Digital Release Radar for one region × window (SPEC §4): the cron-computed
+ * `radar_entries` joined to their movies, provider chips resolved for the chosen
+ * region. Global tables, anon-readable — no auth, no browser TMDb calls.
+ */
+export function useRadar(region: string, window: "recent" | "upcoming") {
+  return useQuery({
+    queryKey: ["radar", region, window],
+    enabled: !!region,
+    queryFn: async (): Promise<Movie[]> => {
+      const { data, error } = await supabase
+        .from("radar_entries")
+        .select(
+          `rank, movie:movies!inner(
+            id, imdb_id, tmdb_id, title, year, poster_path, genres,
+            theatrical_date, theatrical_region, digital_date, digital_region,
+            watch_providers(region, provider_name, offer_type, display_priority)
+          )`,
+        )
+        .eq("region", region)
+        .eq("window", window)
+        .order("rank");
+      if (error) throw error;
+      const rows = (data ?? []) as unknown as RadarRow[];
+      return rows
+        .map((r) => r.movie)
+        .filter((m): m is NonNullable<RadarRow["movie"]> => m != null)
+        .map((m) => ({
+          id: m.id,
+          imdbId: m.imdb_id,
+          tmdbId: m.tmdb_id,
+          title: m.title,
+          year: m.year,
+          posterPath: m.poster_path,
+          genres: m.genres ?? [],
+          theatricalDate: m.theatrical_date,
+          theatricalRegion: m.theatrical_region,
+          digitalDate: m.digital_date,
+          digitalRegion: m.digital_region,
+          providersBG: toProviders(m.watch_providers, region),
+        }));
+    },
+  });
+}
+
 // ---- Search & follow (SPEC §11) ---------------------------------------
 
 export interface SearchHit {
@@ -151,9 +221,10 @@ export function useFollow() {
 
 /** The movie ids the user currently follows (their manual Followed list) — RLS
  * scopes to the caller, so this drives the panel's Follow/Unfollow state. */
-export function useFollowedIds() {
+export function useFollowedIds(enabled = true) {
   return useQuery({
     queryKey: ["followed-ids"],
+    enabled,
     queryFn: async (): Promise<number[]> => {
       const { data, error } = await supabase
         .from("list_memberships")
@@ -335,10 +406,12 @@ export function useSettings() {
   });
 }
 
-/** The most recent run, for the navbar's last-run summary. */
-export function useLastRun() {
+/** The most recent run, for the navbar's last-run summary (signed-in only —
+ * refresh_runs is not anon-readable). */
+export function useLastRun(enabled = true) {
   return useQuery({
     queryKey: ["last-run"],
+    enabled,
     queryFn: async (): Promise<RefreshRun | null> => {
       const { data, error } = await supabase
         .from("refresh_runs")

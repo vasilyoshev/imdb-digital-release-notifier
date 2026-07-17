@@ -1,14 +1,17 @@
+import { useState } from "react";
 import { useAuth } from "./lib/auth-context";
 import { AppShell } from "./components/AppShell";
 import { LoginScreen } from "./components/LoginScreen";
 
 /**
- * The route guard (SPEC §10). One account, one decision: while the session is
- * resolving show a spinner; then render the app shell if signed in, otherwise
- * the login screen. No router — the app is a single authenticated page.
+ * The route guard (SPEC §4, §10). No redirect for signed-out visitors: the app
+ * shell renders the public Digital Release Radar for everyone, and "Sign in" is
+ * a view you opt into. On sign-in the auth listener swaps in the signed-in
+ * Console automatically.
  */
 export default function App() {
   const { session, loading } = useAuth();
+  const [showLogin, setShowLogin] = useState(false);
 
   if (loading) {
     return (
@@ -18,5 +21,9 @@ export default function App() {
     );
   }
 
-  return session ? <AppShell /> : <LoginScreen />;
+  if (!session && showLogin) {
+    return <LoginScreen onBack={() => setShowLogin(false)} />;
+  }
+
+  return <AppShell onSignIn={() => setShowLogin(true)} />;
 }

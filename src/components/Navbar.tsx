@@ -11,13 +11,25 @@ function fmtTime(iso: string): string {
 }
 
 /**
- * The app frame's top bar (SPEC §9): wordmark · last-run summary · Refresh now
- * · settings gear · account menu. Refresh invokes the pipeline (manual run);
- * the gear opens the settings modal; the badge reflects the latest run.
+ * The app frame's top bar (SPEC §4, §9). Anonymous: wordmark · global search
+ * (signup funnel) · region select · Sign in. Signed-in: adds the last-run badge,
+ * Refresh now, settings gear, and the account menu.
  */
-export function Navbar({ onOpenSettings }: { onOpenSettings?: () => void }) {
+export function Navbar({
+  onOpenSettings,
+  onSignIn,
+  region,
+  onRegionChange,
+  regions,
+}: {
+  onOpenSettings?: () => void;
+  onSignIn?: () => void;
+  region: string;
+  onRegionChange: (r: string) => void;
+  regions: { region: string; name: string }[];
+}) {
   const { user, signOut } = useAuth();
-  const lastRun = useLastRun();
+  const lastRun = useLastRun(!!user);
   const refresh = useRefreshNow();
 
   const lastRunLabel = lastRun.isLoading
@@ -42,52 +54,70 @@ export function Navbar({ onOpenSettings }: { onOpenSettings?: () => void }) {
             RELEASE <span className="text-primary">NOTIFIER</span>
           </span>
         </span>
-        <span className="badge badge-ghost hidden gap-1 font-mono text-xs sm:inline-flex">
-          <span className="opacity-60">last run</span> {lastRunLabel}
-        </span>
+        {user && (
+          <span className="badge badge-ghost hidden gap-1 font-mono text-xs sm:inline-flex">
+            <span className="opacity-60">last run</span> {lastRunLabel}
+          </span>
+        )}
       </div>
 
       <div className="flex flex-none items-center gap-2">
         <NavbarSearch />
-        <button
-          className="btn btn-sm btn-outline btn-primary"
-          onClick={() => refresh.mutate()}
-          disabled={refresh.isPending}
-          title="Run the pipeline now (bypasses the gate hour)"
-        >
-          {refresh.isPending && <span className="loading loading-spinner loading-xs" />}
-          {refresh.isPending ? "Refreshing…" : "Refresh now"}
-        </button>
 
-        <button
-          className="btn btn-ghost btn-sm btn-circle"
-          onClick={() => onOpenSettings?.()}
-          aria-label="Settings"
-          title="Settings"
+        <select
+          className="select select-sm select-bordered w-auto"
+          aria-label="Region"
+          value={region}
+          onChange={(e) => onRegionChange(e.target.value)}
         >
-          <GearIcon className="h-5 w-5" />
-        </button>
+          {regions.map((r) => (
+            <option key={r.region} value={r.region}>
+              {r.region}
+            </option>
+          ))}
+        </select>
 
-        <div className="dropdown dropdown-end">
-          <button
-            tabIndex={0}
-            className="btn btn-ghost btn-sm btn-circle"
-            aria-label="Account menu"
-          >
-            <UserIcon className="h-5 w-5" />
+        {user ? (
+          <>
+            <button
+              className="btn btn-sm btn-outline btn-primary"
+              onClick={() => refresh.mutate()}
+              disabled={refresh.isPending}
+              title="Run the pipeline now (bypasses the gate hour)"
+            >
+              {refresh.isPending && <span className="loading loading-spinner loading-xs" />}
+              {refresh.isPending ? "Refreshing…" : "Refresh now"}
+            </button>
+
+            <button
+              className="btn btn-ghost btn-sm btn-circle"
+              onClick={() => onOpenSettings?.()}
+              aria-label="Settings"
+              title="Settings"
+            >
+              <GearIcon className="h-5 w-5" />
+            </button>
+
+            <div className="dropdown dropdown-end">
+              <button tabIndex={0} className="btn btn-ghost btn-sm btn-circle" aria-label="Account menu">
+                <UserIcon className="h-5 w-5" />
+              </button>
+              <ul
+                tabIndex={0}
+                className="dropdown-content menu z-40 mt-2 w-64 rounded-box border border-base-300 bg-base-100 shadow-xl"
+              >
+                <li className="menu-title truncate text-base-content/60">{user.email ?? "Signed in"}</li>
+                <li>
+                  <button onClick={() => void signOut()}>Sign out</button>
+                </li>
+              </ul>
+            </div>
+          </>
+        ) : (
+          <button className="btn btn-sm btn-primary" onClick={() => onSignIn?.()}>
+            Sign in
           </button>
-          <ul
-            tabIndex={0}
-            className="dropdown-content menu z-40 mt-2 w-64 rounded-box border border-base-300 bg-base-100 shadow-xl"
-          >
-            <li className="menu-title truncate text-base-content/60">
-              {user?.email ?? "Signed in"}
-            </li>
-            <li>
-              <button onClick={() => void signOut()}>Sign out</button>
-            </li>
-          </ul>
-        </div>
+        )}
       </div>
       </header>
 

@@ -13,12 +13,14 @@ export function MovieList({
   sort,
   onToggleSort,
   onSelect,
+  region = "BG",
 }: {
   movies: Movie[];
   today: string;
   sort: SortState;
   onToggleSort: (key: SortKey) => void;
   onSelect: (movieId: number) => void;
+  region?: string;
 }) {
   if (movies.length === 0) {
     return (
@@ -41,7 +43,7 @@ export function MovieList({
               <SortableTh label="Status" sortKey="status" sort={sort} onToggle={onToggleSort} />
               <SortableTh label="Theatrical" sortKey="theatrical" sort={sort} onToggle={onToggleSort} />
               <SortableTh label="Digital" sortKey="digital" sort={sort} onToggle={onToggleSort} />
-              <th>Where to watch (BG)</th>
+              <th>Where to watch ({region})</th>
             </tr>
           </thead>
           <tbody>
