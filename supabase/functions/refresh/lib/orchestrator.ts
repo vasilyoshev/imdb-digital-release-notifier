@@ -7,6 +7,7 @@ import {
   getAllSettings,
   getDeliverableEvents,
   getDeliveredEventIds,
+  getDigitalDatesForRegion,
   getLogStates,
   getMemberships,
   getSubscriptions,
@@ -20,16 +21,18 @@ import {
   type MovieRow,
   openRun,
   replaceProviders,
+  replaceRadarEntries,
   replaceReleaseDates,
   type Settings,
   updateMovie,
   upsertMembership,
 } from "./db.ts";
 import { fetchWatchlist } from "./imdb.ts";
-import { fetchChanges, fetchMovieBundle, findTmdbId } from "./tmdb.ts";
+import { fetchChanges, fetchDiscover, fetchMovieBundle, findTmdbId } from "./tmdb.ts";
 import { buildGlobalCascade, computeEffective, dateInZone, hourInZone } from "./dates.ts";
 import { detectMediumEvents, type MediumLogState } from "./events.ts";
 import { selectDeliveries, selectForHydration } from "./pipeline.ts";
+import { buildRadarRows, radarWindow, type RadarWindow } from "./radar.ts";
 import { buildDigest, type DigestEvent, sendDigest } from "./email.ts";
 import { type PushMessage, sendPushes } from "./push.ts";
 import type { Medium } from "./types.ts";
@@ -42,7 +45,18 @@ const HYDRATION_CAP = Number(Deno.env.get("HYDRATION_CAP") ?? "300");
 // Politeness delay between per-user watchlist fetches (SPEC §5a "staggered").
 const SYNC_STAGGER_MS = Number(Deno.env.get("SYNC_STAGGER_MS") ?? "1000");
 
+// Radar config (SPEC §4). Its own smaller hydration cap so the radar and user
+// syncs can't starve each other; both share the movies cache + refreshed_at.
+const RADAR_HYDRATION_CAP = Number(Deno.env.get("RADAR_HYDRATION_CAP") ?? "120");
+const RADAR_DISCOVER_LIMIT = Number(Deno.env.get("RADAR_DISCOVER_LIMIT") ?? "60");
+const RADAR_RECENT_DAYS = Number(Deno.env.get("RADAR_RECENT_DAYS") ?? "45");
+const RADAR_UPCOMING_DAYS = Number(Deno.env.get("RADAR_UPCOMING_DAYS") ?? "90");
+const RADAR_FRESH_HOURS = Number(Deno.env.get("RADAR_FRESH_HOURS") ?? "20");
+const RADAR_WINDOWS: RadarWindow[] = ["recent", "upcoming"];
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const isFresh = (refreshedAt: string | null, now: number, ms: number) =>
+  refreshedAt !== null && now - Date.parse(refreshedAt) < ms;
 
 interface EventRow {
   movie_id: number;
@@ -50,6 +64,46 @@ interface EventRow {
   event: string;
   effective_date: string;
   seeded: boolean;
+}
+
+/** Write one hydrated bundle onto its movie row — raw dates/providers, cached
+ * metadata (genres, trailer), and the global-cascade effective dates. Mutates
+ * the in-memory `movie` (refreshed_at, imdb backfill) so the shared cache stays
+ * consistent within a run. Returns the effective date per medium for detection. */
+async function applyBundle(
+  db: SupabaseClient,
+  movie: MovieRow,
+  bundle: NonNullable<Awaited<ReturnType<typeof fetchMovieBundle>>>,
+  globalCascade: string[],
+  knownImdbIds: Set<string>,
+): Promise<Record<Medium, string | null>> {
+  const nowIso = new Date().toISOString();
+  const patch: Record<string, unknown> = {
+    title: bundle.title ?? movie.title,
+    year: bundle.year ?? movie.year,
+    poster_path: bundle.posterPath ?? movie.poster_path,
+    genres: bundle.genres,
+    trailer_key: bundle.trailerKey,
+    refreshed_at: nowIso,
+  };
+  if (bundle.imdbId && !movie.imdb_id && !knownImdbIds.has(bundle.imdbId)) {
+    patch.imdb_id = bundle.imdbId;
+    movie.imdb_id = bundle.imdbId;
+    knownImdbIds.add(bundle.imdbId);
+  }
+  await replaceReleaseDates(db, movie.id, bundle.rawDates);
+  await replaceProviders(db, movie.id, bundle.providers);
+
+  const effByMedium = {} as Record<Medium, string | null>;
+  for (const medium of MEDIUMS) {
+    const eff = computeEffective(bundle.rawDates, globalCascade, medium);
+    patch[`${medium}_date`] = eff?.date ?? null;
+    patch[`${medium}_region`] = eff?.region ?? null;
+    effByMedium[medium] = eff?.date ?? null;
+  }
+  await updateMovie(db, movie.id, patch);
+  movie.refreshed_at = nowIso;
+  return effByMedium;
 }
 
 /** Detection is global; hydrate one movie, replace its raw data, and detect the
@@ -75,27 +129,12 @@ async function hydrateAndDetect(
   if (!bundle) return { ok: false, isNew: false, events: [] };
 
   const isNew = movie.first_refreshed_at === null;
-  const patch: Record<string, unknown> = {
-    title: bundle.title ?? movie.title,
-    year: bundle.year ?? movie.year,
-    poster_path: bundle.posterPath ?? movie.poster_path,
-    genres: bundle.genres,
-    trailer_key: bundle.trailerKey,
-    refreshed_at: new Date().toISOString(),
-  };
-  if (bundle.imdbId && !movie.imdb_id && !knownImdbIds.has(bundle.imdbId)) {
-    patch.imdb_id = bundle.imdbId;
-  }
-  await replaceReleaseDates(db, movie.id, bundle.rawDates);
-  await replaceProviders(db, movie.id, bundle.providers);
+  const eff = await applyBundle(db, movie, bundle, globalCascade, knownImdbIds);
 
   const events: EventRow[] = [];
   for (const medium of MEDIUMS) {
-    const eff = computeEffective(bundle.rawDates, globalCascade, medium);
-    patch[`${medium}_date`] = eff?.date ?? null;
-    patch[`${medium}_region`] = eff?.region ?? null;
     const state = logStates.get(`${movie.id}:${medium}`) ?? NO_STATE;
-    for (const ev of detectMediumEvents({ currentEffective: eff?.date ?? null, state, isNewMovie: isNew, today })) {
+    for (const ev of detectMediumEvents({ currentEffective: eff[medium], state, isNewMovie: isNew, today })) {
       events.push({
         movie_id: movie.id,
         medium,
@@ -105,8 +144,81 @@ async function hydrateAndDetect(
       });
     }
   }
-  await updateMovie(db, movie.id, patch);
   return { ok: true, isNew, events };
+}
+
+/** SPEC §4 — the Digital Release Radar's data side, folded into the daily full
+ * run. Per supported region × window: discover digital releases in the window,
+ * ensure/hydrate each (own cap; shared refreshed_at cache dedupes with user
+ * syncs), then verify against the hydrated per-region digital date before
+ * writing ranked radar_entries — discover's top-level date leaks. */
+async function runRadar(
+  db: SupabaseClient,
+  tmdbToken: string,
+  regions: string[],
+  globalCascade: string[],
+  byTmdb: Map<number, MovieRow>,
+  knownImdbIds: Set<string>,
+  today: string,
+): Promise<{ regionsWithData: number; entries: number; hydrated: number }> {
+  const freshMs = RADAR_FRESH_HOURS * 60 * 60 * 1000;
+  const now = Date.now();
+  let hydrated = 0;
+  let entries = 0;
+  let regionsWithData = 0;
+
+  for (const region of regions) {
+    let regionEntries = 0;
+    for (const window of RADAR_WINDOWS) {
+      const range = radarWindow(today, window, RADAR_RECENT_DAYS, RADAR_UPCOMING_DAYS);
+      const sort = window === "recent" ? "primary_release_date.desc" : "primary_release_date.asc";
+      let candidates;
+      try {
+        candidates = await fetchDiscover({
+          filters: {
+            with_release_type: 4,
+            region,
+            "release_date.gte": range.gte,
+            "release_date.lte": range.lte,
+            sort_by: sort,
+          },
+          limit: RADAR_DISCOVER_LIMIT,
+        }, tmdbToken);
+      } catch (err) {
+        console.error(`radar discover ${region}/${window} failed (isolated):`, err);
+        continue;
+      }
+
+      const movieIds: number[] = [];
+      for (const c of candidates) {
+        let movie = byTmdb.get(c.tmdbId);
+        if (!movie) {
+          movie = await insertMovie(db, { tmdb_id: c.tmdbId, title: c.title, year: c.year, poster_path: c.posterPath });
+          byTmdb.set(c.tmdbId, movie);
+        }
+        if (!isFresh(movie.refreshed_at, now, freshMs) && hydrated < RADAR_HYDRATION_CAP) {
+          try {
+            const bundle = await fetchMovieBundle(movie.tmdb_id!, tmdbToken, fetch, regions);
+            if (bundle) {
+              await applyBundle(db, movie, bundle, globalCascade, knownImdbIds);
+              hydrated++;
+            }
+          } catch (err) {
+            console.error(`radar hydrate movie ${movie.id} failed:`, err);
+          }
+        }
+        movieIds.push(movie.id);
+      }
+
+      const digitalByMovie = await getDigitalDatesForRegion(db, movieIds, region);
+      const rows = buildRadarRows(movieIds, region, window, range, digitalByMovie);
+      await replaceRadarEntries(db, region, window, rows);
+      entries += rows.length;
+      regionEntries += rows.length;
+    }
+    if (regionEntries > 0) regionsWithData++;
+  }
+  return { regionsWithData, entries, hydrated };
 }
 
 /** SPEC §8 job 1 — the daily full refresh. Detection only; delivery is the
@@ -217,6 +329,13 @@ export async function runFull(
     await insertEventRows(db, eventRows);
     await markFirstRefreshed(db, refreshedNewMovieIds);
 
+    // ---- 6. Refresh the Digital Release Radar for every supported region. Reads
+    //         the just-hydrated movie cache so shared movies aren't re-fetched.
+    const afterHydrate = await getAllMovies(db);
+    const radarByTmdb = new Map(afterHydrate.filter((m) => m.tmdb_id).map((m) => [m.tmdb_id!, m]));
+    const radarKnownImdb = new Set(afterHydrate.filter((m) => m.imdb_id).map((m) => m.imdb_id!));
+    const radar = await runRadar(db, tmdbToken, regions, globalCascade, radarByTmdb, radarKnownImdb, today);
+
     const moviesDeferred = plan.deferred + fetchFailures;
     await closeRun(db, runId, {
       status: "success",
@@ -234,6 +353,9 @@ export async function runFull(
       eventsCreated: eventRows.length,
       moviesDeferred,
       syncFailures: syncFailures.length,
+      radarRegions: radar.regionsWithData,
+      radarEntries: radar.entries,
+      radarHydrated: radar.hydrated,
     };
   } catch (err) {
     await closeRunSafe(db, runId, err);

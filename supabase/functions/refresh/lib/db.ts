@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import type { ProviderRow, RawDate } from "./types.ts";
 import type { MediumLogState } from "./events.ts";
+import type { RadarWindow } from "./radar.ts";
 
 export interface Settings {
   user_id: string;
@@ -257,6 +258,43 @@ export async function replaceProviders(
         })),
       ),
       "replaceProviders.insert",
+    );
+  }
+}
+
+/** Per-region digital release dates for a set of movies — the radar's
+ * verify-before-write source (SPEC §4), read straight from `release_dates`. */
+export async function getDigitalDatesForRegion(
+  db: SupabaseClient,
+  movieIds: number[],
+  region: string,
+): Promise<Map<number, string>> {
+  if (!movieIds.length) return new Map();
+  const rows = unwrap<{ movie_id: number; release_date: string }[]>(
+    await db.from("release_dates").select("movie_id, release_date")
+      .eq("region", region).eq("medium", "digital").in("movie_id", movieIds),
+    "getDigitalDatesForRegion",
+  );
+  return new Map(rows.map((r) => [r.movie_id, r.release_date]));
+}
+
+/** Replace all radar_entries for one region × window (SPEC §4/§7). */
+export async function replaceRadarEntries(
+  db: SupabaseClient,
+  region: string,
+  window: string,
+  rows: { region: string; window: RadarWindow; movie_id: number; rank: number; digital_date: string }[],
+): Promise<void> {
+  unwrap(
+    await db.from("radar_entries").delete().eq("region", region).eq("window", window),
+    "replaceRadarEntries.delete",
+  );
+  if (rows.length) {
+    unwrap(
+      await db.from("radar_entries").insert(
+        rows.map((r) => ({ region: r.region, window: r.window, movie_id: r.movie_id, rank: r.rank, digital_date: r.digital_date })),
+      ),
+      "replaceRadarEntries.insert",
     );
   }
 }
