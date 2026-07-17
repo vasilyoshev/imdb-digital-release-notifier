@@ -3,7 +3,9 @@ import type { ProviderRow, RawDate } from "./types.ts";
 import type { MediumLogState } from "./events.ts";
 
 export interface Settings {
+  user_id: string;
   region_cascade: string[];
+  timezone: string;
   notify_email: string | null;
   notifications_paused: boolean;
   notify_hour: number;
@@ -11,6 +13,7 @@ export interface Settings {
 
 export interface ListRow {
   id: number;
+  user_id: string;
   kind: "imdb_watchlist" | "manual";
   name: string;
   sync_enabled: boolean;
@@ -26,7 +29,21 @@ export interface MovieRow {
   year: number | null;
   poster_path: string | null;
   first_refreshed_at: string | null;
+  refreshed_at: string | null;
 }
+
+/** One membership row joined to its owning list — the unit both the active-set
+ * computation and per-user delivery gating are built from. */
+export interface MembershipRow {
+  movie_id: number;
+  on_list: boolean;
+  added_at: string;
+  list_id: number;
+  user_id: string;
+  notifications_enabled: boolean;
+}
+
+const MOVIE_COLS = "id, imdb_id, tmdb_id, title, year, poster_path, first_refreshed_at, refreshed_at";
 
 function unwrap<T>(res: { data: T | null; error: { message: string } | null }, what: string): T {
   if (res.error) throw new Error(`db ${what}: ${res.error.message}`);
@@ -46,6 +63,15 @@ export async function getOwnerId(db: SupabaseClient): Promise<string> {
   return row.user_id;
 }
 
+/** Curated supported regions (SPEC §4), in cascade-priority position order. */
+export async function getSupportedRegions(db: SupabaseClient): Promise<string[]> {
+  const rows = unwrap<{ region: string }[]>(
+    await db.from("supported_regions").select("region").order("position"),
+    "getSupportedRegions",
+  );
+  return rows.map((r) => r.region);
+}
+
 export async function getSettings(db: SupabaseClient, userId: string): Promise<Settings> {
   return unwrap(
     await db.from("settings").select("*").eq("user_id", userId).single(),
@@ -53,18 +79,53 @@ export async function getSettings(db: SupabaseClient, userId: string): Promise<S
   );
 }
 
-/** The one user's lists. The v1-compat shim is strictly owner-scoped: other
- * users' lists sync (and notify) only once the pipeline v2 slice lands. */
-export async function getLists(db: SupabaseClient, userId: string): Promise<ListRow[]> {
+/** Every user's settings — drives the global cascade and per-user delivery. */
+export async function getAllSettings(db: SupabaseClient): Promise<Settings[]> {
+  return unwrap(await db.from("settings").select("*"), "getAllSettings");
+}
+
+/** Every user's lists (SPEC §8 job 1 syncs all sync-enabled lists of all users). */
+export async function getAllLists(db: SupabaseClient): Promise<ListRow[]> {
   return unwrap(
-    await db.from("lists").select("*").eq("user_id", userId).order("position"),
-    "getLists",
+    await db.from("lists").select("id, user_id, kind, name, sync_enabled, notifications_enabled, config")
+      .order("position"),
+    "getAllLists",
   );
 }
 
-export async function openRun(db: SupabaseClient, trigger: "cron" | "manual"): Promise<number> {
+/** All memberships joined to their list's owner + notifications flag. */
+export async function getAllMemberships(db: SupabaseClient): Promise<MembershipRow[]> {
+  const rows = unwrap<
+    {
+      movie_id: number;
+      on_list: boolean;
+      added_at: string;
+      list_id: number;
+      lists: { user_id: string; notifications_enabled: boolean } | null;
+    }[]
+  >(
+    await db.from("list_memberships")
+      .select("movie_id, on_list, added_at, list_id, lists!inner(user_id, notifications_enabled)"),
+    "getAllMemberships",
+  );
+  return rows.map((r) => ({
+    movie_id: r.movie_id,
+    on_list: r.on_list,
+    added_at: r.added_at,
+    list_id: r.list_id,
+    user_id: r.lists!.user_id,
+    notifications_enabled: r.lists!.notifications_enabled,
+  }));
+}
+
+export async function openRun(
+  db: SupabaseClient,
+  trigger: "cron" | "manual",
+  job: "full" | "tick" | "delivery" | "user_refresh",
+  userId: string | null = null,
+): Promise<number> {
   const row = unwrap<{ id: number }>(
-    await db.from("refresh_runs").insert({ trigger }).select("id").single(),
+    await db.from("refresh_runs").insert({ trigger, job, user_id: userId }).select("id").single(),
     "openRun",
   );
   return row.id;
@@ -82,15 +143,12 @@ export async function closeRun(
 }
 
 export async function getAllMovies(db: SupabaseClient): Promise<MovieRow[]> {
-  return unwrap(
-    await db.from("movies").select("id, imdb_id, tmdb_id, title, year, poster_path, first_refreshed_at"),
-    "getAllMovies",
-  );
+  return unwrap(await db.from("movies").select(MOVIE_COLS), "getAllMovies");
 }
 
 export async function insertMovie(db: SupabaseClient, fields: Partial<MovieRow>): Promise<MovieRow> {
   return unwrap(
-    await db.from("movies").insert(fields).select("id, imdb_id, tmdb_id, title, year, poster_path, first_refreshed_at").single(),
+    await db.from("movies").insert(fields).select(MOVIE_COLS).single(),
     "insertMovie",
   );
 }
@@ -225,27 +283,49 @@ export async function getLogStates(db: SupabaseClient): Promise<Map<string, Medi
 export async function insertEventRows(
   db: SupabaseClient,
   rows: { movie_id: number; medium: string; event: string; effective_date: string; seeded: boolean }[],
-): Promise<number[]> {
+): Promise<{ id: number; movie_id: number; created_at: string }[]> {
   if (!rows.length) return [];
-  const inserted = unwrap(
-    await db.from("movie_events").insert(rows).select("id"),
+  return unwrap(
+    await db.from("movie_events").insert(rows).select("id, movie_id, created_at"),
     "insertEventRows",
   );
-  return inserted.map((r: { id: number }) => r.id);
 }
 
-/** Record delivered events for one user. v1-compat shim: one 'email' row per
- * event, mirroring the old single sent_at per log row. */
+/** Event ids already delivered to one user (any channel) — the delivery dedupe. */
+export async function getDeliveredEventIds(db: SupabaseClient, userId: string): Promise<Set<number>> {
+  const rows = unwrap<{ event_id: number }[]>(
+    await db.from("notification_deliveries").select("event_id").eq("user_id", userId),
+    "getDeliveredEventIds",
+  );
+  return new Set(rows.map((r) => r.event_id));
+}
+
+/** Non-seeded events on the given movies, oldest first, for delivery selection. */
+export async function getDeliverableEvents(
+  db: SupabaseClient,
+  movieIds: number[],
+): Promise<{ id: number; movie_id: number; medium: string; event: string; effective_date: string; created_at: string }[]> {
+  if (!movieIds.length) return [];
+  return unwrap(
+    await db.from("movie_events")
+      .select("id, movie_id, medium, event, effective_date, created_at")
+      .in("movie_id", movieIds).eq("seeded", false).order("created_at", { ascending: true }),
+    "getDeliverableEvents",
+  );
+}
+
 export async function insertDeliveries(
   db: SupabaseClient,
   userId: string,
   eventIds: number[],
+  channel: "push" | "email",
 ): Promise<void> {
   if (!eventIds.length) return;
   const sentAt = new Date().toISOString();
   unwrap(
-    await db.from("notification_deliveries").insert(
-      eventIds.map((id) => ({ user_id: userId, event_id: id, channel: "email", sent_at: sentAt })),
+    await db.from("notification_deliveries").upsert(
+      eventIds.map((id) => ({ user_id: userId, event_id: id, channel, sent_at: sentAt })),
+      { onConflict: "user_id,event_id,channel" },
     ),
     "insertDeliveries",
   );

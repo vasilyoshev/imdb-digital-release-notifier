@@ -1,5 +1,14 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { extractProviders, extractRawDates, fetchDiscover, findTmdbId } from "./tmdb.ts";
+import {
+  extractGenres,
+  extractProviders,
+  extractRawDates,
+  extractTrailerKey,
+  fetchChanges,
+  fetchDiscover,
+  fetchMovieBundle,
+  findTmdbId,
+} from "./tmdb.ts";
 
 Deno.test("extractRawDates keeps BG/US/GB, maps type 3/4, earliest wins, ignores others", () => {
   const payload = {
@@ -44,6 +53,65 @@ Deno.test("extractProviders flattens offer types for tracked regions with the re
       logoPath: "/a.png", displayPriority: 3, link: "https://www.themoviedb.org/movie/1/watch?locale=BG",
     },
   ]);
+});
+
+Deno.test("extractGenres maps names, drops junk", () => {
+  assertEquals(
+    extractGenres({ genres: [{ id: 1, name: "Drama" }, { id: 2, name: "Sci-Fi" }, { id: 3 }, { name: "" }] }),
+    ["Drama", "Sci-Fi"],
+  );
+  assertEquals(extractGenres({}), []);
+});
+
+Deno.test("extractTrailerKey prefers official YouTube trailer", () => {
+  const json = {
+    videos: {
+      results: [
+        { site: "Vimeo", type: "Trailer", key: "vim", official: true },
+        { site: "YouTube", type: "Teaser", key: "teaser", official: true },
+        { site: "YouTube", type: "Trailer", key: "unofficial", official: false },
+        { site: "YouTube", type: "Trailer", key: "official", official: true },
+      ],
+    },
+  };
+  assertEquals(extractTrailerKey(json), "official");
+  // No trailer → first YouTube video of any type.
+  assertEquals(
+    extractTrailerKey({ videos: { results: [{ site: "YouTube", type: "Clip", key: "clip" }] } }),
+    "clip",
+  );
+  assertEquals(extractTrailerKey({}), null);
+});
+
+Deno.test("fetchMovieBundle bundles videos+genres and honors regions", async () => {
+  const urls: string[] = [];
+  const fakeFetch = ((url: unknown) => {
+    urls.push(String(url));
+    return Promise.resolve(new Response(JSON.stringify({
+      title: "M", release_date: "2026-02-03", poster_path: "/p.png",
+      genres: [{ id: 18, name: "Drama" }],
+      external_ids: { imdb_id: "tt1" },
+      videos: { results: [{ site: "YouTube", type: "Trailer", key: "yt1", official: true }] },
+      release_dates: { results: [{ iso_3166_1: "DE", release_dates: [{ type: 4, release_date: "2026-05-01T00:00:00Z" }] }] },
+      "watch/providers": { results: {} },
+    })));
+  }) as typeof fetch;
+
+  const bundle = await fetchMovieBundle(1, "tok", fakeFetch, ["DE"]);
+  assertEquals(urls[0].includes("append_to_response=release_dates,watch/providers,external_ids,videos"), true);
+  assertEquals(bundle?.genres, ["Drama"]);
+  assertEquals(bundle?.trailerKey, "yt1");
+  assertEquals(bundle?.rawDates, [{ region: "DE", medium: "digital", date: "2026-05-01" }]);
+});
+
+Deno.test("fetchChanges paginates and collects ids", async () => {
+  const fakeFetch = ((url: unknown) => {
+    const page = Number(new URL(String(url)).searchParams.get("page"));
+    return Promise.resolve(new Response(JSON.stringify({
+      page, total_pages: 2, results: [{ id: page * 10 }, { id: page * 10 + 1 }],
+    })));
+  }) as typeof fetch;
+  assertEquals(await fetchChanges("2026-07-17", "tok", fakeFetch), [10, 11, 20, 21]);
 });
 
 Deno.test("findTmdbId reads movie_results only", async () => {

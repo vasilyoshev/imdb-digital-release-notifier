@@ -58,6 +58,30 @@ export function extractRawDates(releaseDates: any, regions: string[] = REGIONS):
 }
 
 // deno-lint-ignore no-explicit-any
+export function extractGenres(json: any): string[] {
+  return (json?.genres ?? [])
+    // deno-lint-ignore no-explicit-any
+    .map((g: any) => g?.name)
+    .filter((n: unknown): n is string => typeof n === "string" && n.length > 0);
+}
+
+/** First YouTube "Trailer" (official preferred), else any YouTube video's key. */
+// deno-lint-ignore no-explicit-any
+export function extractTrailerKey(json: any): string | null {
+  const vids = (json?.videos?.results ?? []).filter(
+    // deno-lint-ignore no-explicit-any
+    (v: any) => v?.site === "YouTube" && typeof v?.key === "string",
+  );
+  const pick =
+    // deno-lint-ignore no-explicit-any
+    vids.find((v: any) => v.type === "Trailer" && v.official) ??
+    // deno-lint-ignore no-explicit-any
+    vids.find((v: any) => v.type === "Trailer") ??
+    vids[0];
+  return pick?.key ?? null;
+}
+
+// deno-lint-ignore no-explicit-any
 export function extractProviders(watchProviders: any, regions: string[] = REGIONS): ProviderRow[] {
   const out: ProviderRow[] = [];
   for (const region of regions) {
@@ -84,9 +108,10 @@ export async function fetchMovieBundle(
   tmdbId: number,
   token: string,
   fetchFn: typeof fetch = fetch,
+  regions: string[] = REGIONS,
 ): Promise<MovieBundle | null> {
   const json = await tmdbGet(
-    `/movie/${tmdbId}?append_to_response=release_dates,watch/providers,external_ids`,
+    `/movie/${tmdbId}?append_to_response=release_dates,watch/providers,external_ids,videos`,
     token,
     fetchFn,
   );
@@ -96,9 +121,27 @@ export async function fetchMovieBundle(
     year: json.release_date ? Number(String(json.release_date).slice(0, 4)) : null,
     posterPath: json.poster_path ?? null,
     imdbId: json.external_ids?.imdb_id || null,
-    rawDates: extractRawDates(json.release_dates),
-    providers: extractProviders(json["watch/providers"]),
+    genres: extractGenres(json),
+    trailerKey: extractTrailerKey(json),
+    rawDates: extractRawDates(json.release_dates, regions),
+    providers: extractProviders(json["watch/providers"], regions),
   };
+}
+
+/** TMDb movie ids reported changed since `startDate` (YYYY-MM-DD). Paginated;
+ * the hourly tick intersects this with tracked movies (SPEC §6, §8 job 2). */
+export async function fetchChanges(
+  startDate: string,
+  token: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<number[]> {
+  const ids: number[] = [];
+  for (let page = 1;; page++) {
+    const json = await tmdbGet(`/movie/changes?start_date=${startDate}&page=${page}`, token, fetchFn);
+    for (const r of json?.results ?? []) if (typeof r?.id === "number") ids.push(r.id);
+    if (!json || page >= (json.total_pages ?? 1) || page >= 500) break;
+  }
+  return ids;
 }
 
 export async function fetchDiscover(
