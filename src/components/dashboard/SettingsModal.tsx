@@ -10,13 +10,7 @@ import {
   useUpdateSettings,
 } from "../../lib/queries";
 import { pushConfigured, pushSupported } from "../../lib/push";
-import {
-  parseImdbUserId,
-  SORT_OPTIONS,
-  type DiscoverConfig,
-  type Settings,
-  type WatchlistConfig,
-} from "../../lib/settings";
+import { parseImdbUserId, type Settings, type WatchlistConfig } from "../../lib/settings";
 
 /**
  * Settings behind the navbar gear (SPEC §9/§10/§11): a global card (email,
@@ -66,14 +60,10 @@ interface EditableList {
   syncEnabled: boolean;
   notificationsEnabled: boolean;
   imdbUserId: string;
-  sortBy: string;
-  voteCountGte: number;
-  limit: number;
 }
 
 function toEditable(l: List): EditableList {
   const wl = l.config as WatchlistConfig;
-  const dc = l.config as DiscoverConfig;
   return {
     id: l.id,
     name: l.name,
@@ -81,9 +71,6 @@ function toEditable(l: List): EditableList {
     syncEnabled: l.syncEnabled,
     notificationsEnabled: l.notificationsEnabled,
     imdbUserId: wl.imdb_user_id ?? "",
-    sortBy: dc.filters?.sort_by ?? "popularity.desc",
-    voteCountGte: (dc.filters?.["vote_count.gte"] as number) ?? 100,
-    limit: dc.limit ?? 50,
   };
 }
 
@@ -97,7 +84,7 @@ function SettingsForm({
   onClose: () => void;
 }) {
   const [email, setEmail] = useState(settings.notifyEmail ?? "");
-  const [regionOrder, setRegionOrder] = useState<string[]>(settings.regionOrder);
+  const [regionCascade, setRegionCascade] = useState<string[]>(settings.regionCascade);
   const [hour, setHour] = useState(settings.notifyHour);
   const [paused, setPaused] = useState(settings.notificationsPaused);
   const [editLists, setEditLists] = useState<EditableList[]>(lists.map(toEditable));
@@ -109,10 +96,10 @@ function SettingsForm({
 
   function moveRegion(i: number, dir: -1 | 1) {
     const j = i + dir;
-    if (j < 0 || j >= regionOrder.length) return;
-    const next = [...regionOrder];
+    if (j < 0 || j >= regionCascade.length) return;
+    const next = [...regionCascade];
     [next[i], next[j]] = [next[j], next[i]];
-    setRegionOrder(next);
+    setRegionCascade(next);
   }
 
   function patchList(id: number, patch: Partial<EditableList>) {
@@ -124,24 +111,20 @@ function SettingsForm({
     try {
       await updateSettings.mutateAsync({
         notify_email: email.trim() || null,
-        region_order: regionOrder,
+        region_cascade: regionCascade,
         notify_hour: hour,
         notifications_paused: paused,
       });
       for (const l of editLists) {
-        const config =
-          l.kind === "imdb_watchlist"
-            ? { imdb_user_id: parseImdbUserId(l.imdbUserId) }
-            : {
-                filters: { sort_by: l.sortBy, "vote_count.gte": l.voteCountGte },
-                limit: l.limit,
-              };
+        // Manual lists (Followed) have no source config — leave theirs untouched.
         await updateList.mutateAsync({
           id: l.id,
           patch: {
             sync_enabled: l.syncEnabled,
             notifications_enabled: l.notificationsEnabled,
-            config,
+            ...(l.kind === "imdb_watchlist"
+              ? { config: { imdb_user_id: parseImdbUserId(l.imdbUserId) } }
+              : {}),
           },
         });
       }
@@ -173,10 +156,10 @@ function SettingsForm({
 
           <div>
             <span className="mb-1 block text-xs font-medium text-base-content/60">
-              Region order <span className="opacity-50">(effective date & providers)</span>
+              Region cascade <span className="opacity-50">(effective date & providers)</span>
             </span>
             <ul className="flex flex-col gap-1">
-              {regionOrder.map((r, i) => (
+              {regionCascade.map((r, i) => (
                 <li
                   key={r}
                   className="flex items-center justify-between rounded-field border border-base-300 bg-base-100 px-3 py-1.5"
@@ -197,7 +180,7 @@ function SettingsForm({
                     <button
                       className="btn btn-ghost btn-xs"
                       onClick={() => moveRegion(i, 1)}
-                      disabled={i === regionOrder.length - 1}
+                      disabled={i === regionCascade.length - 1}
                       aria-label={`Move ${r} down`}
                     >
                       ↓
@@ -253,7 +236,7 @@ function SettingsForm({
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-semibold">{l.name}</h3>
               <span className="badge badge-ghost badge-sm">
-                {l.kind === "imdb_watchlist" ? "IMDb" : "TMDb Discover"}
+                {l.kind === "imdb_watchlist" ? "IMDb" : "Manual"}
               </span>
             </div>
 
@@ -280,7 +263,7 @@ function SettingsForm({
               </label>
             </div>
 
-            {l.kind === "imdb_watchlist" ? (
+            {l.kind === "imdb_watchlist" && (
               <label className="block">
                 <span className="mb-1 block text-xs font-medium text-base-content/60">
                   Watchlist (IMDb user id or URL)
@@ -293,52 +276,6 @@ function SettingsForm({
                   placeholder="ur27331503"
                 />
               </label>
-            ) : (
-              <div className="flex flex-wrap gap-4">
-                <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-base-content/60">
-                    Sort by
-                  </span>
-                  <select
-                    value={l.sortBy}
-                    onChange={(e) => patchList(l.id, { sortBy: e.target.value })}
-                    className="select"
-                  >
-                    {SORT_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-base-content/60">
-                    Min votes
-                  </span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={l.voteCountGte}
-                    onChange={(e) =>
-                      patchList(l.id, { voteCountGte: Number(e.target.value) })
-                    }
-                    className="input w-28"
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-base-content/60">
-                    Limit
-                  </span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={200}
-                    value={l.limit}
-                    onChange={(e) => patchList(l.id, { limit: Number(e.target.value) })}
-                    className="input w-28"
-                  />
-                </label>
-              </div>
             )}
           </div>
         </section>

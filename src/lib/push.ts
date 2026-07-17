@@ -61,10 +61,17 @@ export async function subscribeThisDevice(): Promise<void> {
     throw new Error("The push subscription was incomplete — try again.");
   }
 
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError) throw userError;
   const { error } = await supabase
     .from("push_subscriptions")
     .upsert(
-      { endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth },
+      {
+        user_id: userData.user.id,
+        endpoint: json.endpoint,
+        p256dh: json.keys.p256dh,
+        auth: json.keys.auth,
+      },
       { onConflict: "endpoint" },
     );
   if (error) throw error;

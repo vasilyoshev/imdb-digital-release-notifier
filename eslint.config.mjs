@@ -6,7 +6,8 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   // The Supabase Edge Functions are Deno (checked via `deno test`), not part of the Vite lint.
-  { ignores: ["dist", "supabase/functions", "scripts"] },
+  // .claude holds agent worktrees (research branches) — never lint material.
+  { ignores: ["dist", "supabase/functions", "scripts", ".claude", ".next"] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],

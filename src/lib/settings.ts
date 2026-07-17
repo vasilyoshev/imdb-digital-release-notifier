@@ -1,11 +1,12 @@
 /**
- * Settings + run-control domain: the singleton `settings` row, the `refresh_runs`
+ * Settings + run-control domain: the user's `settings` row, the `refresh_runs`
  * summary the navbar shows, and the payload "Refresh now" returns. Writes go
- * through RLS-permitted UPDATE on `settings` and `lists` (SPEC §10).
+ * through RLS-permitted UPDATE on the user's own `settings` and `lists` rows
+ * (SPEC v2 §13).
  */
 
 export interface Settings {
-  regionOrder: string[];
+  regionCascade: string[];
   notifyEmail: string | null;
   notificationsPaused: boolean;
   notifyHour: number;
@@ -43,23 +44,6 @@ export interface PushDevice {
 export interface WatchlistConfig {
   imdb_user_id?: string;
 }
-
-/** TMDb Discover list config (kind = tmdb_discover). */
-export interface DiscoverConfig {
-  filters?: {
-    sort_by?: string;
-    "vote_count.gte"?: number;
-    [k: string]: unknown;
-  };
-  limit?: number;
-}
-
-export const SORT_OPTIONS: { value: string; label: string }[] = [
-  { value: "popularity.desc", label: "Most popular" },
-  { value: "vote_average.desc", label: "Highest rated" },
-  { value: "primary_release_date.desc", label: "Newest releases" },
-  { value: "revenue.desc", label: "Highest grossing" },
-];
 
 /** Accepts a `ur…` id or a full IMDb URL and returns the bare user id. */
 export function parseImdbUserId(input: string): string {

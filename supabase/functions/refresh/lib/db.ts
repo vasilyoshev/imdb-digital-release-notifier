@@ -3,7 +3,7 @@ import type { ProviderRow, RawDate } from "./types.ts";
 import type { MediumLogState } from "./events.ts";
 
 export interface Settings {
-  region_order: string[];
+  region_cascade: string[];
   notify_email: string | null;
   notifications_paused: boolean;
   notify_hour: number;
@@ -11,7 +11,7 @@ export interface Settings {
 
 export interface ListRow {
   id: number;
-  kind: "imdb_watchlist" | "tmdb_discover";
+  kind: "imdb_watchlist" | "manual";
   name: string;
   sync_enabled: boolean;
   notifications_enabled: boolean;
@@ -37,8 +37,20 @@ export function createServiceClient(url: string, serviceKey: string): SupabaseCl
   return createClient(url, serviceKey, { auth: { persistSession: false } });
 }
 
-export async function getSettings(db: SupabaseClient): Promise<Settings> {
-  return unwrap(await db.from("settings").select("*").single(), "getSettings");
+/** The owner's auth.users id — the single profiles row with role 'owner'. */
+export async function getOwnerId(db: SupabaseClient): Promise<string> {
+  const row = unwrap<{ user_id: string }>(
+    await db.from("profiles").select("user_id").eq("role", "owner").single(),
+    "getOwnerId",
+  );
+  return row.user_id;
+}
+
+export async function getSettings(db: SupabaseClient, userId: string): Promise<Settings> {
+  return unwrap(
+    await db.from("settings").select("*").eq("user_id", userId).single(),
+    "getSettings",
+  );
 }
 
 export async function getLists(db: SupabaseClient): Promise<ListRow[]> {
@@ -188,7 +200,7 @@ export async function replaceProviders(
 
 export async function getLogStates(db: SupabaseClient): Promise<Map<string, MediumLogState>> {
   const rows = unwrap(
-    await db.from("notification_log")
+    await db.from("movie_events")
       .select("movie_id, medium, event, effective_date, created_at")
       .order("created_at", { ascending: true }),
     "getLogStates",
@@ -205,23 +217,32 @@ export async function getLogStates(db: SupabaseClient): Promise<Map<string, Medi
   return map;
 }
 
-export async function insertLogRows(
+export async function insertEventRows(
   db: SupabaseClient,
-  rows: { movie_id: number; medium: string; event: string; effective_date: string; sent_at: string | null }[],
+  rows: { movie_id: number; medium: string; event: string; effective_date: string; seeded: boolean }[],
 ): Promise<number[]> {
   if (!rows.length) return [];
   const inserted = unwrap(
-    await db.from("notification_log").insert(rows).select("id"),
-    "insertLogRows",
+    await db.from("movie_events").insert(rows).select("id"),
+    "insertEventRows",
   );
   return inserted.map((r: { id: number }) => r.id);
 }
 
-export async function markSent(db: SupabaseClient, ids: number[]): Promise<void> {
-  if (!ids.length) return;
+/** Record delivered events for one user. v1-compat shim: one 'email' row per
+ * event, mirroring the old single sent_at per log row. */
+export async function insertDeliveries(
+  db: SupabaseClient,
+  userId: string,
+  eventIds: number[],
+): Promise<void> {
+  if (!eventIds.length) return;
+  const sentAt = new Date().toISOString();
   unwrap(
-    await db.from("notification_log").update({ sent_at: new Date().toISOString() }).in("id", ids),
-    "markSent",
+    await db.from("notification_deliveries").insert(
+      eventIds.map((id) => ({ user_id: userId, event_id: id, channel: "email", sent_at: sentAt })),
+    ),
+    "insertDeliveries",
   );
 }
 

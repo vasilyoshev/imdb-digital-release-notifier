@@ -146,38 +146,46 @@ export function useActiveMovies() {
   });
 }
 
-interface LogRow {
-  id: number;
-  event: string;
-  medium: string;
-  effective_date: string;
-  sent_at: string | null;
-  movie: { title: string | null } | null;
+interface DeliveryRow {
+  sent_at: string;
+  event: {
+    id: number;
+    event: string;
+    medium: string;
+    effective_date: string;
+    movie: { title: string | null } | null;
+  } | null;
 }
 
 /**
- * The visible notification history: sent rows only (seeded rows with a null
- * sent_at stay hidden, per CONTEXT.md), newest first.
+ * The visible notification history: the user's own deliveries (RLS-scoped),
+ * each joined to its global movie event. Seeded events are never delivered,
+ * so they stay hidden by construction. Newest first.
  */
 export function useNotificationLog() {
   return useQuery({
     queryKey: ["notification-log"],
     queryFn: async (): Promise<LogEntry[]> => {
       const { data, error } = await supabase
-        .from("notification_log")
-        .select("id, event, medium, effective_date, sent_at, movie:movies(title)")
-        .not("sent_at", "is", null)
+        .from("notification_deliveries")
+        .select(
+          "sent_at, event:movie_events(id, event, medium, effective_date, movie:movies(title))",
+        )
         .order("sent_at", { ascending: false });
       if (error) throw error;
-      const rows = (data ?? []) as unknown as LogRow[];
-      return rows.map((r) => ({
-        id: r.id,
-        event: r.event as LogEntry["event"],
-        medium: r.medium as LogEntry["medium"],
-        effectiveDate: r.effective_date,
-        sentAt: r.sent_at!,
-        movieTitle: r.movie?.title ?? "Untitled",
-      }));
+      const rows = (data ?? []) as unknown as DeliveryRow[];
+      return rows
+        .filter((r): r is DeliveryRow & { event: NonNullable<DeliveryRow["event"]> } =>
+          r.event != null,
+        )
+        .map((r) => ({
+          id: r.event.id,
+          event: r.event.event as LogEntry["event"],
+          medium: r.event.medium as LogEntry["medium"],
+          effectiveDate: r.event.effective_date,
+          sentAt: r.sent_at,
+          movieTitle: r.event.movie?.title ?? "Untitled",
+        }));
     },
   });
 }
@@ -190,11 +198,11 @@ export function useSettings() {
     queryFn: async (): Promise<Settings> => {
       const { data, error } = await supabase
         .from("settings")
-        .select("region_order, notify_email, notifications_paused, notify_hour")
+        .select("region_cascade, notify_email, notifications_paused, notify_hour")
         .single();
       if (error) throw error;
       return {
-        regionOrder: data.region_order,
+        regionCascade: data.region_cascade,
         notifyEmail: data.notify_email,
         notificationsPaused: data.notifications_paused,
         notifyHour: data.notify_hour,
@@ -254,12 +262,17 @@ export function useUpdateSettings() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (patch: {
-      region_order?: string[];
+      region_cascade?: string[];
       notify_email?: string | null;
       notifications_paused?: boolean;
       notify_hour?: number;
     }) => {
-      const { error } = await supabase.from("settings").update(patch).eq("id", true);
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+      const { error } = await supabase
+        .from("settings")
+        .update(patch)
+        .eq("user_id", userData.user.id);
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["settings"] }),

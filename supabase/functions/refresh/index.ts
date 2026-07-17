@@ -1,27 +1,33 @@
-import { closeRun, createServiceClient, deleteSubscriptions, getAllMovies, getLists, getLogStates, getMemberships, getSettings, getSubscriptions, insertLogRows, insertMovie, markFirstRefreshed, markSent, mergeMovies, openRun, replaceProviders, replaceReleaseDates, updateMovie, upsertMembership, type MovieRow } from "./lib/db.ts";
+import { closeRun, createServiceClient, deleteSubscriptions, getAllMovies, getLists, getLogStates, getMemberships, getOwnerId, getSettings, getSubscriptions, insertDeliveries, insertEventRows, insertMovie, markFirstRefreshed, mergeMovies, openRun, replaceProviders, replaceReleaseDates, updateMovie, upsertMembership, type MovieRow } from "./lib/db.ts";
 import { fetchWatchlist } from "./lib/imdb.ts";
-import { fetchDiscover, fetchMovieBundle, findTmdbId, type DiscoverConfig } from "./lib/tmdb.ts";
+import { fetchMovieBundle, findTmdbId } from "./lib/tmdb.ts";
 import { computeEffective, sofiaHour, sofiaToday } from "./lib/dates.ts";
 import { detectMediumEvents } from "./lib/events.ts";
 import { buildDigest, sendDigest, type DigestEvent } from "./lib/email.ts";
 import { sendPushes, type PushMessage } from "./lib/push.ts";
-import { roleFromAuthHeader } from "./lib/auth.ts";
+import { claimsFromAuthHeader } from "./lib/auth.ts";
 import type { Medium } from "./lib/types.ts";
 
 const MEDIUMS: Medium[] = ["theatrical", "digital"];
 
 Deno.serve(async (req: Request) => {
-  const role = roleFromAuthHeader(req.headers.get("authorization"));
-  if (role !== "service_role" && role !== "authenticated") {
+  const claims = claimsFromAuthHeader(req.headers.get("authorization"));
+  if (claims?.role !== "service_role" && claims?.role !== "authenticated") {
     return Response.json({ error: "forbidden" }, { status: 403 });
   }
-  const trigger: "cron" | "manual" = role === "service_role" ? "cron" : "manual";
+  const trigger: "cron" | "manual" = claims.role === "service_role" ? "cron" : "manual";
 
   const db = createServiceClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
-  const settings = await getSettings(db);
+  const ownerId = await getOwnerId(db);
+  // The manual full-pipeline trigger is owner-only (SPEC §8); per-user
+  // Refresh-now arrives with the delivery slice.
+  if (trigger === "manual" && claims.sub !== ownerId) {
+    return Response.json({ error: "forbidden" }, { status: 403 });
+  }
+  const settings = await getSettings(db, ownerId);
 
   // Gate Hour: hourly cron only proceeds at the configured Sofia hour.
   if (trigger === "cron" && sofiaHour() !== settings.notify_hour) {
@@ -43,35 +49,23 @@ Deno.serve(async (req: Request) => {
     // ---- 2. Sync each sync-enabled list (soft membership, never delete)
     const activeIds = new Set<number>();
     for (const list of lists) {
-      if (!list.sync_enabled) {
+      // Manual lists (Followed) have no external source — their memberships
+      // only change via follow/unfollow. They still contribute active movies.
+      if (!list.sync_enabled || list.kind !== "imdb_watchlist") {
         for (const m of await getMemberships(db, list.id)) if (m.on_list) activeIds.add(m.movie_id);
         continue;
       }
       const listMovieIds: number[] = [];
-      if (list.kind === "imdb_watchlist") {
-        const userId = String(list.config.imdb_user_id ?? "");
-        if (!userId) throw new Error(`list ${list.id} (${list.name}) has no imdb_user_id`);
-        const items = await fetchWatchlist(userId);
-        for (const item of items) {
-          let movie = byImdb.get(item.imdbId);
-          if (!movie) {
-            movie = await insertMovie(db, { imdb_id: item.imdbId, title: item.title, year: item.year });
-            byImdb.set(item.imdbId, movie);
-          }
-          listMovieIds.push(movie.id);
+      const userId = String(list.config.imdb_user_id ?? "");
+      if (!userId) throw new Error(`list ${list.id} (${list.name}) has no imdb_user_id`);
+      const items = await fetchWatchlist(userId);
+      for (const item of items) {
+        let movie = byImdb.get(item.imdbId);
+        if (!movie) {
+          movie = await insertMovie(db, { imdb_id: item.imdbId, title: item.title, year: item.year });
+          byImdb.set(item.imdbId, movie);
         }
-      } else {
-        const items = await fetchDiscover(list.config as DiscoverConfig, tmdbToken);
-        for (const item of items) {
-          let movie = byTmdb.get(item.tmdbId);
-          if (!movie) {
-            movie = await insertMovie(db, {
-              tmdb_id: item.tmdbId, title: item.title, year: item.year, poster_path: item.posterPath,
-            });
-            byTmdb.set(item.tmdbId, movie);
-          }
-          listMovieIds.push(movie.id);
-        }
+        listMovieIds.push(movie.id);
       }
       const wanted = new Set(listMovieIds);
       const existing = await getMemberships(db, list.id);
@@ -119,7 +113,8 @@ Deno.serve(async (req: Request) => {
     let matched = 0;
     const refreshedNewMovieIds: number[] = [];
     const pendingLog: {
-      movie: MovieRow; medium: Medium; event: string; effective_date: string; silent: boolean;
+      movie: MovieRow; medium: Medium; event: string; effective_date: string;
+      seeded: boolean; deliver: boolean;
     }[] = [];
 
     for (const movie of active) {
@@ -132,6 +127,7 @@ Deno.serve(async (req: Request) => {
         title: bundle.title ?? movie.title,
         year: bundle.year ?? movie.year,
         poster_path: bundle.posterPath ?? movie.poster_path,
+        refreshed_at: new Date().toISOString(),
       };
       if (bundle.imdbId && !movie.imdb_id && !byImdb.has(bundle.imdbId)) {
         patch.imdb_id = bundle.imdbId;
@@ -140,7 +136,7 @@ Deno.serve(async (req: Request) => {
       await replaceProviders(db, movie.id, bundle.providers);
 
       for (const medium of MEDIUMS) {
-        const eff = computeEffective(bundle.rawDates, settings.region_order, medium);
+        const eff = computeEffective(bundle.rawDates, settings.region_cascade, medium);
         patch[`${medium}_date`] = eff?.date ?? null;
         patch[`${medium}_region`] = eff?.region ?? null;
         const state = logStates.get(`${movie.id}:${medium}`) ??
@@ -152,25 +148,30 @@ Deno.serve(async (req: Request) => {
           today,
         });
         for (const ev of detected) {
-          const silent = ev.pastFactOnFirstObservation || paused || !notifyEligible.has(movie.id);
-          pendingLog.push({ movie, medium, event: ev.event, effective_date: ev.effectiveDate, silent });
+          // v2 semantics: seeded marks only past-facts-at-first-observation;
+          // pause/eligibility gate the delivery, not the event.
+          const seeded = ev.pastFactOnFirstObservation;
+          const deliver = !seeded && !paused && notifyEligible.has(movie.id);
+          pendingLog.push({
+            movie, medium, event: ev.event, effective_date: ev.effectiveDate, seeded, deliver,
+          });
         }
       }
       await updateMovie(db, movie.id, patch);
     }
 
-    // ---- 5. Log all events; deliver the non-silent ones
+    // ---- 5. Log all events globally; deliver the deliverable ones to the owner
     const rows = pendingLog.map((p) => ({
       movie_id: p.movie.id, medium: p.medium, event: p.event,
-      effective_date: p.effective_date, sent_at: null,
+      effective_date: p.effective_date, seeded: p.seeded,
     }));
-    const ids = await insertLogRows(db, rows);
+    const ids = await insertEventRows(db, rows);
     // A movie is "new" until its first refresh whose events were logged: stamping
-    // only after insertLogRows means a crash mid-run leaves it re-detectable.
+    // only after insertEventRows means a crash mid-run leaves it re-detectable.
     await markFirstRefreshed(db, refreshedNewMovieIds);
     const toSend = pendingLog
-      .map((p, i) => ({ ...p, logId: ids[i] }))
-      .filter((p) => !p.silent);
+      .map((p, i) => ({ ...p, eventId: ids[i] }))
+      .filter((p) => p.deliver);
 
     let notificationsSent = 0;
     if (toSend.length) {
@@ -219,7 +220,7 @@ Deno.serve(async (req: Request) => {
         console.warn("VAPID_KEYS_JSON missing — skipping push");
       }
 
-      await markSent(db, toSend.map((p) => p.logId));
+      await insertDeliveries(db, ownerId, toSend.map((p) => p.eventId));
       notificationsSent = toSend.length;
     }
 

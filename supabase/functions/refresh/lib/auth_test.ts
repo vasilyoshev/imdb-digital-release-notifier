@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { roleFromAuthHeader } from "./auth.ts";
+import { claimsFromAuthHeader } from "./auth.ts";
 
 function jwt(payload: object): string {
   const b64 = (o: object) =>
@@ -7,13 +7,20 @@ function jwt(payload: object): string {
   return `${b64({ alg: "HS256" })}.${b64(payload)}.sig`;
 }
 
-Deno.test("extracts role from a bearer JWT", () => {
-  assertEquals(roleFromAuthHeader(`Bearer ${jwt({ role: "service_role" })}`), "service_role");
-  assertEquals(roleFromAuthHeader(`Bearer ${jwt({ role: "authenticated" })}`), "authenticated");
+Deno.test("extracts role and sub from a bearer JWT", () => {
+  assertEquals(
+    claimsFromAuthHeader(`Bearer ${jwt({ role: "service_role" })}`),
+    { role: "service_role", sub: undefined },
+  );
+  assertEquals(
+    claimsFromAuthHeader(`Bearer ${jwt({ role: "authenticated", sub: "abc-123" })}`),
+    { role: "authenticated", sub: "abc-123" },
+  );
 });
 
 Deno.test("null on missing/malformed headers", () => {
-  assertEquals(roleFromAuthHeader(null), null);
-  assertEquals(roleFromAuthHeader("Bearer not.a"), null);
-  assertEquals(roleFromAuthHeader("Bearer a.!!!.c"), null);
+  assertEquals(claimsFromAuthHeader(null), null);
+  assertEquals(claimsFromAuthHeader("Bearer not.a"), null);
+  assertEquals(claimsFromAuthHeader("Bearer a.!!!.c"), null);
+  assertEquals(claimsFromAuthHeader(`Bearer ${jwt({ nope: true })}`), null);
 });
