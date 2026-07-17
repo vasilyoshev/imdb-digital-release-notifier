@@ -1,11 +1,21 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   statusOf,
   STATUS_ORDER,
   todayISO,
   type DerivedStatus,
 } from "../../lib/dashboard";
+import {
+  applyControls,
+  defaultControls,
+  deriveOptions,
+  loadControls,
+  saveControls,
+  type TableControls,
+  toggleSort,
+} from "../../lib/table-controls";
 import { useLists, useListMovies } from "../../lib/queries";
+import { FilterToolbar } from "./FilterToolbar";
 import { MovieList } from "./MovieList";
 import { SideRail } from "./SideRail";
 
@@ -18,11 +28,22 @@ export function Dashboard() {
   const lists = useLists();
   const [activeList, setActiveList] = useState<number | null>(null);
   const [filter, setFilter] = useState<DerivedStatus | null>(null);
+  const [controls, setControls] = useState<TableControls>(defaultControls);
 
   // Default to the first list once they load.
   const listId = activeList ?? lists.data?.[0]?.id;
   const movies = useListMovies(listId);
   const today = todayISO();
+
+  // Sort + filter state persists per list/tab (localStorage) — load on switch.
+  useEffect(() => {
+    if (listId != null) setControls(loadControls(listId));
+  }, [listId]);
+
+  const updateControls = (next: TableControls) => {
+    setControls(next);
+    if (listId != null) saveControls(listId, next);
+  };
 
   const counts = useMemo(() => {
     const c = Object.fromEntries(STATUS_ORDER.map((s) => [s, 0])) as Record<
@@ -33,17 +54,13 @@ export function Dashboard() {
     return c;
   }, [movies.data, today]);
 
+  const options = useMemo(() => deriveOptions(movies.data ?? []), [movies.data]);
+
   const rows = useMemo(() => {
-    const all = movies.data ?? [];
-    return all
-      .filter((m) => !filter || statusOf(m, today) === filter)
-      .sort(
-        (a, b) =>
-          STATUS_ORDER.indexOf(statusOf(a, today)) -
-            STATUS_ORDER.indexOf(statusOf(b, today)) ||
-          (a.title ?? "").localeCompare(b.title ?? ""),
-      );
-  }, [movies.data, filter, today]);
+    // Stat-strip status filter composes with the toolbar filters + sort.
+    const byStatus = (movies.data ?? []).filter((m) => !filter || statusOf(m, today) === filter);
+    return applyControls(byStatus, controls, today);
+  }, [movies.data, filter, controls, today]);
 
   if (lists.isError) {
     return <LoadError message={(lists.error as Error).message} />;
@@ -102,6 +119,15 @@ export function Dashboard() {
         </div>
       )}
 
+      {/* Sort + provider/genre/year controls (persist per list/tab) */}
+      <FilterToolbar
+        options={options}
+        sort={controls.sort}
+        filters={controls.filters}
+        onSortChange={(sort) => updateControls({ ...controls, sort })}
+        onFiltersChange={(filters) => updateControls({ ...controls, filters })}
+      />
+
       {/* The table / cards, with the Upcoming/History rail alongside */}
       <div className="grid items-start gap-4 lg:grid-cols-[1fr_20rem]">
         <div>
@@ -112,7 +138,12 @@ export function Dashboard() {
               <span className="loading loading-dots loading-lg text-primary" />
             </div>
           ) : (
-            <MovieList movies={rows} today={today} />
+            <MovieList
+              movies={rows}
+              today={today}
+              sort={controls.sort}
+              onToggleSort={(key) => updateControls({ ...controls, sort: toggleSort(controls.sort, key) })}
+            />
           )}
         </div>
         <SideRail />
