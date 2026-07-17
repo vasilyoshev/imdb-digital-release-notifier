@@ -8,7 +8,7 @@ import { AttributionLine } from "./Footer";
  * marquee bulbs over the wordmark, a soft projector glow, one amber CTA.
  * On success the auth listener swaps in the app shell — no manual redirect.
  */
-export function LoginScreen() {
+export function LoginScreen({ onBack }: { onBack?: () => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -139,6 +139,16 @@ export function LoginScreen() {
             </p>
           </div>
         </form>
+
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            className="btn btn-ghost btn-sm mt-4 w-full text-base-content/60"
+          >
+            ← Back to the radar
+          </button>
+        )}
 
         <footer className="mt-6 text-center">
           <AttributionLine />
