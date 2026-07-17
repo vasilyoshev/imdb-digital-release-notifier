@@ -40,8 +40,9 @@ Deno.serve(async (req: Request) => {
     if (!tmdbToken) throw new Error("TMDB_BEARER is not set");
     const today = sofiaToday();
 
-    // ---- 1. Load state
-    const lists = await getLists(db);
+    // ---- 1. Load state (owner-scoped: the shim runs v1 semantics for the
+    // owner only; multi-user sync/delivery arrive with pipeline v2)
+    const lists = await getLists(db, ownerId);
     const movies = await getAllMovies(db);
     const byImdb = new Map(movies.filter((m) => m.imdb_id).map((m) => [m.imdb_id!, m]));
     const byTmdb = new Map(movies.filter((m) => m.tmdb_id).map((m) => [m.tmdb_id!, m]));
@@ -201,7 +202,7 @@ Deno.serve(async (req: Request) => {
       const vapid = Deno.env.get("VAPID_KEYS_JSON");
       if (vapid) {
         try {
-          const subs = await getSubscriptions(db);
+          const subs = await getSubscriptions(db, ownerId);
           const messages: PushMessage[] = digestEvents.map((e) => ({
             title: e.event === "released"
               ? `${e.movieTitle} is out now (${e.medium})`

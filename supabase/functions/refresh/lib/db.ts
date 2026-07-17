@@ -53,8 +53,13 @@ export async function getSettings(db: SupabaseClient, userId: string): Promise<S
   );
 }
 
-export async function getLists(db: SupabaseClient): Promise<ListRow[]> {
-  return unwrap(await db.from("lists").select("*").order("position"), "getLists");
+/** The one user's lists. The v1-compat shim is strictly owner-scoped: other
+ * users' lists sync (and notify) only once the pipeline v2 slice lands. */
+export async function getLists(db: SupabaseClient, userId: string): Promise<ListRow[]> {
+  return unwrap(
+    await db.from("lists").select("*").eq("user_id", userId).order("position"),
+    "getLists",
+  );
 }
 
 export async function openRun(db: SupabaseClient, trigger: "cron" | "manual"): Promise<number> {
@@ -246,10 +251,15 @@ export async function insertDeliveries(
   );
 }
 
+/** One user's push subscriptions — never broadcast across tenants. */
 export async function getSubscriptions(
   db: SupabaseClient,
+  userId: string,
 ): Promise<{ endpoint: string; p256dh: string; auth: string }[]> {
-  return unwrap(await db.from("push_subscriptions").select("endpoint, p256dh, auth"), "getSubscriptions");
+  return unwrap(
+    await db.from("push_subscriptions").select("endpoint, p256dh, auth").eq("user_id", userId),
+    "getSubscriptions",
+  );
 }
 
 export async function deleteSubscriptions(db: SupabaseClient, endpoints: string[]): Promise<void> {
