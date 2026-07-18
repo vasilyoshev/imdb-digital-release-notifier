@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../lib/auth-context";
-import { useSupportedRegions } from "../lib/queries";
+import { useProfile, useSupportedRegions } from "../lib/queries";
 import { loadRegion, saveRegion } from "../lib/region";
 import { Navbar } from "./Navbar";
 import { Footer } from "./Footer";
 import { InstallBanner } from "./InstallBanner";
+import { OnboardingWizard } from "./OnboardingWizard";
 import { Dashboard } from "./dashboard/Dashboard";
 import { SettingsModal } from "./dashboard/SettingsModal";
 
@@ -16,6 +17,7 @@ import { SettingsModal } from "./dashboard/SettingsModal";
  */
 export function AppShell({ onSignIn }: { onSignIn: () => void }) {
   const { user } = useAuth();
+  const profile = useProfile(!!user);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const regions = useSupportedRegions();
   const supported = regions.data?.map((r) => r.region) ?? [];
@@ -47,6 +49,7 @@ export function AppShell({ onSignIn }: { onSignIn: () => void }) {
       </main>
       <Footer />
       {user && <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />}
+      {user && profile.data && !profile.data.onboarded && <OnboardingWizard />}
     </div>
   );
 }

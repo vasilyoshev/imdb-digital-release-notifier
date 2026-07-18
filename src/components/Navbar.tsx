@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { useAuth } from "../lib/auth-context";
-import { useLastRun, useRefreshNow } from "../lib/queries";
+import { useDeleteAccount, useLastRun, useRefreshNow } from "../lib/queries";
 import { Mark } from "./Mark";
 import { NavbarSearch } from "./NavbarSearch";
 
@@ -31,6 +32,8 @@ export function Navbar({
   const { user, signOut } = useAuth();
   const lastRun = useLastRun(!!user);
   const refresh = useRefreshNow();
+  const deleteAccount = useDeleteAccount();
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const lastRunLabel = lastRun.isLoading
     ? "…"
@@ -110,6 +113,11 @@ export function Navbar({
                 <li>
                   <button onClick={() => void signOut()}>Sign out</button>
                 </li>
+                <li>
+                  <button className="text-error" onClick={() => setConfirmDelete(true)}>
+                    Delete account
+                  </button>
+                </li>
               </ul>
             </div>
           </>
@@ -138,6 +146,39 @@ export function Navbar({
             >
               ✕
             </button>
+          </div>
+        </div>
+      )}
+
+      {confirmDelete && (
+        <div className="modal modal-open">
+          <div className="modal-box">
+            <h3 className="text-lg font-semibold">Delete your account?</h3>
+            <p className="py-2 text-sm text-base-content/70">
+              This permanently removes your watchlist sync, follows, settings, and push devices.
+              Shared movie data stays. This can&apos;t be undone.
+            </p>
+            {deleteAccount.isError && (
+              <div role="alert" className="alert alert-error py-2 text-sm">
+                <span>{(deleteAccount.error as Error).message}</span>
+              </div>
+            )}
+            <div className="modal-action">
+              <button className="btn btn-ghost" onClick={() => setConfirmDelete(false)} disabled={deleteAccount.isPending}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-error"
+                disabled={deleteAccount.isPending}
+                onClick={async () => {
+                  await deleteAccount.mutateAsync();
+                  await signOut();
+                }}
+              >
+                {deleteAccount.isPending && <span className="loading loading-spinner loading-xs" />}
+                Delete account
+              </button>
+            </div>
           </div>
         </div>
       )}
