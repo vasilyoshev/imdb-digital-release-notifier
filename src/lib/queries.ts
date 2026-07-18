@@ -110,6 +110,49 @@ export function useListMovies(listId: number | undefined) {
   });
 }
 
+// ---- Onboarding & account (SPEC §3) -----------------------------------
+
+/** The caller's profile — role + whether they've finished onboarding. */
+export function useProfile(enabled = true) {
+  return useQuery({
+    queryKey: ["profile"],
+    enabled,
+    queryFn: async (): Promise<{ role: string; onboarded: boolean } | null> => {
+      const { data, error } = await supabase.from("profiles").select("role, onboarded").maybeSingle();
+      if (error) throw error;
+      return data ? { role: data.role, onboarded: data.onboarded } : null;
+    },
+  });
+}
+
+/** Complete onboarding via the edge function (settings + optional watchlist list
+ * + onboarded flag); refetch everything so the Console reflects the new state. */
+export function useOnboard() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { regionCascade: string[]; timezone: string; imdbUserId: string | null }) => {
+      const { data, error } = await supabase.functions.invoke("onboard", { body: input });
+      if (error) throw error;
+      const p = data as { error?: string } | null;
+      if (p?.error) throw new Error(p.error);
+      return p;
+    },
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+/** Self-serve account deletion via the edge function; the caller signs out after. */
+export function useDeleteAccount() {
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke("delete-account", { body: {} });
+      if (error) throw error;
+      const p = data as { error?: string } | null;
+      if (p?.error) throw new Error(p.error);
+    },
+  });
+}
+
 // ---- Digital Release Radar (SPEC §4) ----------------------------------
 
 /** The curated supported regions for the navbar region select (anon-readable). */
