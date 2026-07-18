@@ -36,7 +36,7 @@ export function Footer() {
       <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-6 sm:flex-row sm:items-center sm:justify-between">
         <AttributionLine />
         <a
-          href="stremio://release-notifier.netlify.app/manifest.json"
+          href="stremio://release-notifier.yoshevbot.uk/manifest.json"
           className="btn btn-sm btn-outline shrink-0 gap-2"
           title="Install the Digital Release Radar catalogs in Stremio"
         >

@@ -36,10 +36,10 @@ export function NavbarSearch() {
   const showDropdown = open && (!user || q.trim().length >= 1);
 
   return (
-    <div className="relative">
+    <div className="relative w-full sm:w-auto">
       <input
         type="search"
-        className="input input-sm input-bordered w-36 sm:w-56"
+        className="input input-sm input-bordered w-full sm:w-56"
         placeholder="Search movies…"
         aria-label="Search movies"
         value={q}
