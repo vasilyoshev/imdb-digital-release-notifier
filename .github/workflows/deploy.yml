@@ -30,6 +30,12 @@ jobs:
         run: 'echo "CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID not set — building only, skipping the deploy (see control-tower#65)."'
 
       - uses: actions/checkout@v4
+        with:
+          # Production is the rebuild branch (see AGENTS.md): pin the build to
+          # it so a manual dispatch selected from another branch cannot deploy
+          # that branch by accident. The v2 launch (#75) retargets this to main
+          # together with the push trigger above.
+          ref: rebuild
 
       - uses: actions/setup-node@v4
         with:
