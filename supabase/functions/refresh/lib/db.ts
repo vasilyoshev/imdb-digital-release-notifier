@@ -223,10 +223,26 @@ export async function getAllMovies(db: SupabaseClient): Promise<MovieRow[]> {
 }
 
 export async function insertMovie(db: SupabaseClient, fields: Partial<MovieRow>): Promise<MovieRow> {
-  return unwrap(
-    await db.from("movies").insert(fields).select(MOVIE_COLS).single(),
-    "insertMovie",
-  );
+  const res = await db.from("movies").insert(fields).select(MOVIE_COLS).single();
+  // A concurrent insert or a stale in-memory dedup map can race us to the unique
+  // (tmdb_id / imdb_id) key — recover by returning the row that already exists.
+  if (res.error) {
+    if (res.error.code === "23505") {
+      if (fields.tmdb_id != null) {
+        const existing = await getMovieByTmdbId(db, fields.tmdb_id);
+        if (existing) return existing;
+      }
+      if (fields.imdb_id != null) {
+        const rows = unwrap<MovieRow[]>(
+          await db.from("movies").select(MOVIE_COLS).eq("imdb_id", fields.imdb_id).limit(1),
+          "insertMovie.recover",
+        );
+        if (rows[0]) return rows[0];
+      }
+    }
+    throw new Error(`db insertMovie: ${res.error.message}`);
+  }
+  return res.data!;
 }
 
 export async function updateMovie(
