@@ -2,11 +2,15 @@
  * Pure logic for the "Digital Release Radar" Stremio addon (SPEC §12). No SDK:
  * the addon is catalogs-only HTTP + JSON, reading radar_entries + movies through
  * the anon PostgREST surface. Kept side-effect-free (bar the one fetch helper)
- * so the shapes can be unit-tested without the Netlify runtime.
+ * so the shapes can be unit-tested without a runtime.
+ *
+ * Ported from the retired Netlify function to the Cloudflare Worker at the
+ * Netlify-exit cutover (repo #75). The logic is identical; only the runtime
+ * shell (worker/index.ts) changed.
  */
 
 export const ADDON_ID = "uk.yoshevbot.release-notifier.radar";
-export const APP_URL = "https://release-notifier.netlify.app";
+export const APP_URL = "https://release-notifier.yoshevbot.uk";
 /** The regions offered in the catalog "genre" dropdown (SPEC §12). */
 export const REGIONS = ["US", "BG", "GB", "DE"];
 export const PAGE_SIZE = 100;

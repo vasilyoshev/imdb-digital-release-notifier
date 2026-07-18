@@ -1,0 +1,23 @@
+# Cloudflare Workers deploy for release-notifier (Netlify-exit, repo #75).
+#
+# Assets + code Worker: the Vite SPA ships as static assets (SPA not-found
+# fallback replaces the old netlify.toml /* → /index.html rewrite), and a small
+# Worker (worker/index.ts) serves the Stremio addon routes, ported from the
+# retired Netlify function. `run_worker_first` forces the addon paths through the
+# Worker; every other path is served asset-first, so the app shell and hashed
+# assets never hit Worker code.
+name = "release-notifier"
+main = "worker/index.ts"
+compatibility_date = "2026-07-01"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/manifest.json", "/catalog/movie/*"]
+
+# Anon PostgREST surface for the Stremio addon (same public values the SPA build
+# already embeds — no service role, no secrets).
+[vars]
+VITE_SUPABASE_URL = "https://api.notifier.yoshevbot.uk"
+VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzg0MTQ0Nzg4LCJleHAiOjIwOTk1MDQ3ODh9.cJaaRM9vrNEmoauJ-6K9-9teDZdLRSXALXwL9WEJjBw"
