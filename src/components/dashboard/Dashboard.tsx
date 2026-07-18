@@ -16,12 +16,13 @@ import {
 } from "../../lib/table-controls";
 import { useAuth } from "../../lib/auth-context";
 import { useLists, useListMovies, useRadar } from "../../lib/queries";
+import { ConnectWatchlist } from "./ConnectWatchlist";
 import { FilterToolbar } from "./FilterToolbar";
 import { MovieDetailPanel } from "./MovieDetailPanel";
 import { MovieList } from "./MovieList";
 import { SideRail } from "./SideRail";
 
-type Tab = "radar" | number;
+type Tab = "radar" | "connect" | number;
 type RadarWindow = "recent" | "upcoming";
 
 /**
@@ -43,11 +44,14 @@ export function Dashboard({ region }: { region: string }) {
   const [selectedMovieId, setSelectedMovieId] = useState<number | null>(null);
   const today = todayISO();
 
-  const onRadar = activeTab === "radar" || !isAuth; // anon only ever sees the radar
+  const hasWatchlist = (lists.data ?? []).some((l) => l.kind === "imdb_watchlist");
+  const onConnect = isAuth && activeTab === "connect";
+  const onRadar = !onConnect && (activeTab === "radar" || !isAuth); // anon only ever sees the radar
   const radar = useRadar(region, radarWindow);
-  const listMovies = useListMovies(onRadar ? undefined : activeTab);
+  const listMovies = useListMovies(typeof activeTab === "number" ? activeTab : undefined);
   const source = onRadar ? radar : listMovies;
   const movies = useMemo(() => source.data ?? [], [source.data]);
+  const activeListKind = (lists.data ?? []).find((l) => l.id === activeTab)?.kind;
 
   // Controls persist per surface: radar keys on region×window, lists on id.
   const controlsKey = onRadar ? `radar:${region}:${radarWindow}` : `list:${activeTab}`;
@@ -85,9 +89,18 @@ export function Dashboard({ region }: { region: string }) {
             {l.name}
           </TabButton>
         ))}
+        {isAuth && !hasWatchlist && (
+          <TabButton active={onConnect} onClick={() => { setActiveTab("connect"); setFilter(null); }}>
+            + Watchlist
+          </TabButton>
+        )}
         {lists.isLoading && <span className="loading loading-dots loading-sm mx-3 self-center" />}
       </div>
 
+      {onConnect ? (
+        <ConnectWatchlist />
+      ) : (
+        <>
       {onRadar ? (
         /* Radar window toggle (SPEC §4): the product is dates, not statuses. */
         <div role="tablist" className="tabs tabs-boxed w-fit bg-base-100">
@@ -145,6 +158,8 @@ export function Dashboard({ region }: { region: string }) {
             <div className="grid place-items-center py-16">
               <span className="loading loading-dots loading-lg text-primary" />
             </div>
+          ) : activeListKind === "imdb_watchlist" && rows.length === 0 ? (
+            <ConnectWatchlist reconnect />
           ) : (
             <MovieList
               movies={rows}
@@ -158,6 +173,8 @@ export function Dashboard({ region }: { region: string }) {
         </div>
         {isAuth ? <SideRail /> : <SignupRail />}
       </div>
+        </>
+      )}
 
       <MovieDetailPanel
         movieId={selectedMovieId}

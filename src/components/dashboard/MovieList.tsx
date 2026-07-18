@@ -1,6 +1,6 @@
 import { statusOf, type Movie } from "../../lib/dashboard";
 import type { SortKey, SortState } from "../../lib/table-controls";
-import { DateCell, Poster, ProviderChip, StatusBadge } from "./atoms";
+import { DateCell, Poster, ProviderChip, RatingCell, StatusBadge } from "./atoms";
 
 /**
  * The dense watchlist table (SPEC §9). On md+ it's a real table with clickable
@@ -40,6 +40,7 @@ export function MovieList({
           <thead>
             <tr>
               <SortableTh label="Movie" sortKey="title" sort={sort} onToggle={onToggleSort} />
+              <SortableTh label="Rating" sortKey="rating" sort={sort} onToggle={onToggleSort} />
               <SortableTh label="Status" sortKey="status" sort={sort} onToggle={onToggleSort} />
               <SortableTh label="Theatrical" sortKey="theatrical" sort={sort} onToggle={onToggleSort} />
               <SortableTh label="Digital" sortKey="digital" sort={sort} onToggle={onToggleSort} />
@@ -61,6 +62,9 @@ export function MovieList({
                       <div className="text-xs opacity-60">{m.year ?? "—"}</div>
                     </div>
                   </div>
+                </td>
+                <td>
+                  <RatingCell movie={m} />
                 </td>
                 <td>
                   <StatusBadge status={statusOf(m, today)} />
@@ -96,7 +100,10 @@ export function MovieList({
                     <div className="truncate font-medium">
                       {m.title ?? "Untitled"}
                     </div>
-                    <div className="text-xs opacity-60">{m.year ?? "—"}</div>
+                    <div className="flex items-center gap-2 text-xs opacity-60">
+                      <span>{m.year ?? "—"}</span>
+                      <RatingCell movie={m} />
+                    </div>
                   </div>
                   <StatusBadge status={statusOf(m, today)} />
                 </div>

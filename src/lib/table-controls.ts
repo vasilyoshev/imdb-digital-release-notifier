@@ -5,9 +5,9 @@
  * works anonymously. Status filtering stays on the stat strip (Dashboard), and
  * composes with these before the sort runs.
  */
-import { type Movie, STATUS_ORDER, statusOf } from "./dashboard";
+import { effectiveRating, effectiveVotes, type Movie, STATUS_ORDER, statusOf } from "./dashboard";
 
-export type SortKey = "title" | "digital" | "theatrical" | "status" | "year";
+export type SortKey = "title" | "digital" | "theatrical" | "status" | "year" | "rating";
 export type SortDir = "asc" | "desc";
 
 export interface SortState {
@@ -20,6 +20,8 @@ export interface Filters {
   genres: string[];
   yearMin: number | null;
   yearMax: number | null;
+  /** Hide movies with fewer than this many rating votes (popularity floor). */
+  minVotes: number | null;
 }
 
 export interface TableControls {
@@ -35,12 +37,13 @@ const DEFAULT_DIR: Record<SortKey, SortDir> = {
   theatrical: "desc",
   status: "asc", // ladder order: Out now first
   year: "desc",
+  rating: "desc", // highest-rated first
 };
 
 export function defaultControls(): TableControls {
   return {
     sort: { key: "digital", dir: "desc" },
-    filters: { providers: [], genres: [], yearMin: null, yearMax: null },
+    filters: { providers: [], genres: [], yearMin: null, yearMax: null, minVotes: null },
   };
 }
 
@@ -80,7 +83,8 @@ export function deriveOptions(movies: Movie[]): FilterOptions {
 }
 
 export function filtersActive(f: Filters): boolean {
-  return f.providers.length > 0 || f.genres.length > 0 || f.yearMin != null || f.yearMax != null;
+  return f.providers.length > 0 || f.genres.length > 0 ||
+    f.yearMin != null || f.yearMax != null || f.minVotes != null;
 }
 
 function passesFilters(m: Movie, f: Filters): boolean {
@@ -88,6 +92,7 @@ function passesFilters(m: Movie, f: Filters): boolean {
   if (f.genres.length && !m.genres.some((g) => f.genres.includes(g))) return false;
   if (f.yearMin != null && (m.year == null || m.year < f.yearMin)) return false;
   if (f.yearMax != null && (m.year == null || m.year > f.yearMax)) return false;
+  if (f.minVotes != null && effectiveVotes(m) < f.minVotes) return false;
   return true;
 }
 
@@ -101,6 +106,8 @@ function compareBy(a: Movie, b: Movie, key: SortKey, today: string): number {
       return STATUS_ORDER.indexOf(statusOf(a, today)) - STATUS_ORDER.indexOf(statusOf(b, today));
     case "year":
       return nullsLastNum(a.year, b.year);
+    case "rating":
+      return nullsLastNum(effectiveRating(a)?.score ?? null, effectiveRating(b)?.score ?? null);
     case "digital":
       return nullsLastStr(a.digitalDate, b.digitalDate);
     case "theatrical":

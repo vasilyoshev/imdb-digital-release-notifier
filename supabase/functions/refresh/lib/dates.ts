@@ -1,15 +1,34 @@
 import type { Effective, Medium, RawDate } from "./types.ts";
 
+/**
+ * The effective date for a medium is the EARLIEST release date across every
+ * region we track (decided 2026-07-18): "when did this first hit theatrical /
+ * digital, anywhere". A late regional re-release (e.g. a 2003 film re-listed as
+ * digital in one region in 2025) no longer masks the original date. Ties break
+ * by `regionOrder` priority, then region code, so the result is deterministic.
+ */
 export function computeEffective(
   raw: RawDate[],
   regionOrder: string[],
   medium: Medium,
 ): Effective | null {
-  for (const region of regionOrder) {
-    const hit = raw.find((d) => d.medium === medium && d.region === region);
-    if (hit) return { date: hit.date, region };
+  const priority = (r: string) => {
+    const i = regionOrder.indexOf(r);
+    return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+  };
+  let best: RawDate | null = null;
+  for (const d of raw) {
+    if (d.medium !== medium) continue;
+    if (
+      best === null ||
+      d.date < best.date ||
+      (d.date === best.date && priority(d.region) < priority(best.region)) ||
+      (d.date === best.date && priority(d.region) === priority(best.region) && d.region < best.region)
+    ) {
+      best = d;
+    }
   }
-  return null;
+  return best ? { date: best.date, region: best.region } : null;
 }
 
 /**

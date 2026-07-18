@@ -10,23 +10,41 @@ const raw: RawDate[] = [
   { region: "US", medium: "theatrical", date: "2026-05-01" },
 ];
 
-Deno.test("first region in order wins even with a later date", () => {
+Deno.test("earliest date across all regions wins, regardless of cascade order", () => {
+  // GB 2026-07-20 is earlier than US 2026-08-01 → GB, even though US is first.
   assertEquals(
     computeEffective(raw, ["BG", "US", "GB"], "digital"),
-    { date: "2026-08-01", region: "US" },
-  );
-});
-
-Deno.test("falls through regions without a date for the medium", () => {
-  assertEquals(
-    computeEffective(raw, ["BG", "GB", "US"], "digital"),
     { date: "2026-07-20", region: "GB" },
   );
 });
 
+Deno.test("earliest wins even from a region outside the cascade", () => {
+  const withPL: RawDate[] = [
+    { region: "US", medium: "digital", date: "2025-11-26" },
+    { region: "PL", medium: "digital", date: "2003-12-26" }, // earliest, not in cascade
+  ];
+  assertEquals(
+    computeEffective(withPL, ["BG", "US", "GB"], "digital"),
+    { date: "2003-12-26", region: "PL" },
+  );
+});
+
+Deno.test("ties break by cascade priority then region code", () => {
+  const tie: RawDate[] = [
+    { region: "GB", medium: "digital", date: "2026-07-20" },
+    { region: "US", medium: "digital", date: "2026-07-20" },
+  ];
+  // US precedes GB in this cascade → US wins the same-date tie.
+  assertEquals(computeEffective(tie, ["US", "GB"], "digital"), { date: "2026-07-20", region: "US" });
+});
+
 Deno.test("null when no region has the medium", () => {
-  assertEquals(computeEffective(raw, ["BG"], "digital"), null);
+  assertEquals(computeEffective(raw, ["BG"], "digital")?.date, "2026-07-20"); // still earliest, cascade ignored
   assertEquals(computeEffective([], ["BG", "US", "GB"], "theatrical"), null);
+  assertEquals(
+    computeEffective([{ region: "US", medium: "digital", date: "2026-01-01" }], ["US"], "theatrical"),
+    null,
+  );
 });
 
 Deno.test("buildGlobalCascade returns a lone user's cascade verbatim (v1-equivalent)", () => {

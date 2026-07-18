@@ -111,6 +111,11 @@ export function Navbar({
               >
                 <li className="menu-title truncate text-base-content/60">{user.email ?? "Signed in"}</li>
                 <li>
+                  <a href="stremio://release-notifier.netlify.app/manifest.json">
+                    🎬 Add to Stremio
+                  </a>
+                </li>
+                <li>
                   <button onClick={() => void signOut()}>Sign out</button>
                 </li>
                 <li>
