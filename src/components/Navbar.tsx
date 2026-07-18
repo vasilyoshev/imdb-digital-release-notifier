@@ -49,11 +49,11 @@ export function Navbar({
 
   return (
     <>
-      <header className="navbar sticky top-0 z-30 border-b border-base-300 bg-base-100/95 px-4 backdrop-blur">
+      <header className="navbar flex-wrap gap-y-2 sticky top-0 z-30 border-b border-base-300 bg-base-100/95 px-4 backdrop-blur">
       <div className="flex flex-1 items-center gap-3">
         <span className="flex items-center gap-2">
           <Mark className="h-6 w-6 text-primary" />
-          <span className="wordmark text-2xl text-base-content">
+          <span className="wordmark hidden text-2xl text-base-content sm:inline">
             RELEASE <span className="text-primary">NOTIFIER</span>
           </span>
         </span>
@@ -64,9 +64,12 @@ export function Navbar({
         )}
       </div>
 
-      <div className="flex flex-none items-center gap-2">
+      {/* Search: its own full-width row on mobile (the navbar wraps), inline on ≥sm. */}
+      <div className="order-last w-full sm:order-none sm:w-auto">
         <NavbarSearch />
+      </div>
 
+      <div className="flex flex-none items-center gap-2">
         <select
           className="select select-sm select-bordered w-auto"
           aria-label="Region"
@@ -111,7 +114,7 @@ export function Navbar({
               >
                 <li className="menu-title truncate text-base-content/60">{user.email ?? "Signed in"}</li>
                 <li>
-                  <a href="stremio://release-notifier.netlify.app/manifest.json">
+                  <a href="stremio://release-notifier.yoshevbot.uk/manifest.json">
                     🎬 Add to Stremio
                   </a>
                 </li>
