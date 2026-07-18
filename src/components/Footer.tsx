@@ -33,8 +33,15 @@ export function AttributionLine() {
 export function Footer() {
   return (
     <footer className="border-t border-base-300 bg-base-100">
-      <div className="mx-auto max-w-7xl px-4 py-6">
+      <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-6 sm:flex-row sm:items-center sm:justify-between">
         <AttributionLine />
+        <a
+          href="stremio://release-notifier.netlify.app/manifest.json"
+          className="btn btn-sm btn-outline shrink-0 gap-2"
+          title="Install the Digital Release Radar catalogs in Stremio"
+        >
+          <span aria-hidden>🎬</span> Add to Stremio
+        </a>
       </div>
     </footer>
   );
