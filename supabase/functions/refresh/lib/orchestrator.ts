@@ -103,14 +103,19 @@ export async function applyBundle(
     knownImdbIds.add(bundle.imdbId);
   }
 
-  // True IMDb rating + votes from OMDb, when configured (by imdb id).
+  // True IMDb rating + votes from OMDb, when configured (by imdb id). OMDb's free
+  // tier is 1,000 calls/day, so only spend a call when we don't already have a
+  // rating — this converges to just the still-unrated movies (new releases IMDb
+  // hasn't scored yet), keeping the pipeline well under quota. Vote-count drift
+  // on already-rated titles is refreshed by a periodic sweep, not every run.
   const omdbKey = Deno.env.get("OMDB_API_KEY");
   const imdbId = (patch.imdb_id as string | undefined) ?? movie.imdb_id;
-  if (omdbKey && imdbId) {
+  if (omdbKey && imdbId && movie.imdb_rating == null) {
     const rating = await fetchImdbRating(imdbId, omdbKey);
-    if (rating) {
+    if (rating?.imdbRating != null) {
       patch.imdb_rating = rating.imdbRating;
       patch.imdb_votes = rating.imdbVotes;
+      movie.imdb_rating = rating.imdbRating;
     }
   }
 

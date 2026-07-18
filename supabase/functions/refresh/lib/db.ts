@@ -31,6 +31,7 @@ export interface MovieRow {
   poster_path: string | null;
   first_refreshed_at: string | null;
   refreshed_at: string | null;
+  imdb_rating: number | null;
 }
 
 /** One membership row joined to its owning list — the unit both the active-set
@@ -44,7 +45,7 @@ export interface MembershipRow {
   notifications_enabled: boolean;
 }
 
-const MOVIE_COLS = "id, imdb_id, tmdb_id, title, year, poster_path, first_refreshed_at, refreshed_at";
+const MOVIE_COLS = "id, imdb_id, tmdb_id, title, year, poster_path, first_refreshed_at, refreshed_at, imdb_rating";
 
 function unwrap<T>(res: { data: T | null; error: { message: string } | null }, what: string): T {
   if (res.error) throw new Error(`db ${what}: ${res.error.message}`);
