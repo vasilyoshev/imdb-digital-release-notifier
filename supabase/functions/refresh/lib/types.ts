@@ -43,6 +43,10 @@ export interface MovieBundle {
   overview: string | null;
   /** Genre names from the same bundle call (SPEC §6, zero extra HTTP). */
   genres: string[];
+  /** TMDB's own rating (0–10), vote count, and popularity score. */
+  tmdbRating: number | null;
+  tmdbVotes: number | null;
+  popularity: number | null;
   /** YouTube key of the movie's trailer, or null — rides append_to_response=videos. */
   trailerKey: string | null;
   rawDates: RawDate[];

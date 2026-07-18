@@ -29,6 +29,7 @@ import {
   upsertMembership,
 } from "./db.ts";
 import { fetchWatchlist } from "./imdb.ts";
+import { fetchImdbRating } from "./omdb.ts";
 import { fetchChanges, fetchDiscover, fetchMovieBundle, findTmdbId } from "./tmdb.ts";
 import { buildGlobalCascade, computeEffective, dateInZone, hourInZone } from "./dates.ts";
 import { detectMediumEvents, type MediumLogState } from "./events.ts";
@@ -91,6 +92,9 @@ export async function applyBundle(
     overview: bundle.overview,
     genres: bundle.genres,
     trailer_key: bundle.trailerKey,
+    tmdb_rating: bundle.tmdbRating,
+    tmdb_votes: bundle.tmdbVotes,
+    popularity: bundle.popularity,
     refreshed_at: nowIso,
   };
   if (bundle.imdbId && !movie.imdb_id && !knownImdbIds.has(bundle.imdbId)) {
@@ -98,6 +102,18 @@ export async function applyBundle(
     movie.imdb_id = bundle.imdbId;
     knownImdbIds.add(bundle.imdbId);
   }
+
+  // True IMDb rating + votes from OMDb, when configured (by imdb id).
+  const omdbKey = Deno.env.get("OMDB_API_KEY");
+  const imdbId = (patch.imdb_id as string | undefined) ?? movie.imdb_id;
+  if (omdbKey && imdbId) {
+    const rating = await fetchImdbRating(imdbId, omdbKey);
+    if (rating) {
+      patch.imdb_rating = rating.imdbRating;
+      patch.imdb_votes = rating.imdbVotes;
+    }
+  }
+
   await replaceReleaseDates(db, movie.id, bundle.rawDates);
   await replaceProviders(db, movie.id, bundle.providers);
 

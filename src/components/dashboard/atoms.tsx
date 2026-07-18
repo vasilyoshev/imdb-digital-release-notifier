@@ -1,5 +1,7 @@
 import {
+  effectiveRating,
   fmtFull,
+  fmtVotes,
   PROVIDER_KIND_CLASS,
   STATUS_BADGE,
   type DerivedStatus,
@@ -53,6 +55,18 @@ export function StatusBadge({
   return (
     <span className={`badge ${size} ${STATUS_BADGE[status]} whitespace-nowrap`}>
       {status}
+    </span>
+  );
+}
+
+/** Score + vote count — IMDb when available, else TMDB (shown in the tooltip). */
+export function RatingCell({ movie }: { movie: Movie }) {
+  const r = effectiveRating(movie);
+  if (!r) return <span className="opacity-40">—</span>;
+  return (
+    <span className="whitespace-nowrap" title={`${r.source} rating`}>
+      <span className="text-amber-400">★</span> {r.score.toFixed(1)}
+      {r.votes > 0 && <span className="ml-1 text-xs opacity-50">{fmtVotes(r.votes)}</span>}
     </span>
   );
 }

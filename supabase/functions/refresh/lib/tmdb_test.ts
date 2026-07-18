@@ -90,7 +90,7 @@ Deno.test("fetchMovieBundle bundles videos+genres and honors regions", async () 
     urls.push(String(url));
     return Promise.resolve(new Response(JSON.stringify({
       title: "M", release_date: "2026-02-03", poster_path: "/p.png",
-      overview: "A synopsis.",
+      overview: "A synopsis.", vote_average: 7.4, vote_count: 1200, popularity: 88.5,
       genres: [{ id: 18, name: "Drama" }],
       external_ids: { imdb_id: "tt1" },
       videos: { results: [{ site: "YouTube", type: "Trailer", key: "yt1", official: true }] },
@@ -104,6 +104,7 @@ Deno.test("fetchMovieBundle bundles videos+genres and honors regions", async () 
   assertEquals(bundle?.overview, "A synopsis.");
   assertEquals(bundle?.genres, ["Drama"]);
   assertEquals(bundle?.trailerKey, "yt1");
+  assertEquals([bundle?.tmdbRating, bundle?.tmdbVotes, bundle?.popularity], [7.4, 1200, 88.5]);
   assertEquals(bundle?.rawDates, [{ region: "DE", medium: "digital", date: "2026-05-01" }]);
 });
 

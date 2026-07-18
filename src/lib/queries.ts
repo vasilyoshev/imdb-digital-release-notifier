@@ -52,6 +52,10 @@ interface MembershipRow {
     year: number | null;
     poster_path: string | null;
     genres: string[] | null;
+    imdb_rating: number | null;
+    imdb_votes: number | null;
+    tmdb_rating: number | null;
+    tmdb_votes: number | null;
     theatrical_date: string | null;
     theatrical_region: string | null;
     digital_date: string | null;
@@ -79,7 +83,7 @@ export function useListMovies(listId: number | undefined) {
         .from("list_memberships")
         .select(
           `movie:movies!inner(
-            id, imdb_id, tmdb_id, title, year, poster_path, genres,
+            id, imdb_id, tmdb_id, title, year, poster_path, genres, imdb_rating, imdb_votes, tmdb_rating, tmdb_votes,
             theatrical_date, theatrical_region, digital_date, digital_region,
             watch_providers(region, provider_name, offer_type, display_priority)
           )`,
@@ -100,6 +104,7 @@ export function useListMovies(listId: number | undefined) {
           year: m.year,
           posterPath: m.poster_path,
           genres: m.genres ?? [],
+          imdbRating: m.imdb_rating, imdbVotes: m.imdb_votes, tmdbRating: m.tmdb_rating, tmdbVotes: m.tmdb_votes,
           theatricalDate: m.theatrical_date,
           theatricalRegion: m.theatrical_region,
           digitalDate: m.digital_date,
@@ -138,6 +143,21 @@ export function useOnboard() {
       return p;
     },
     onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+/** Connect / change the IMDb watchlist from anywhere (not just settings). */
+export function useSetWatchlist() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (url: string) => {
+      const { data, error } = await supabase.functions.invoke("set-watchlist", { body: { url } });
+      if (error) throw error;
+      const p = data as { error?: string; imdbUserId?: string } | null;
+      if (p?.error) throw new Error(p.error);
+      return p;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["lists"] }),
   });
 }
 
@@ -190,7 +210,7 @@ export function useRadar(region: string, window: "recent" | "upcoming") {
         .from("radar_entries")
         .select(
           `rank, movie:movies!inner(
-            id, imdb_id, tmdb_id, title, year, poster_path, genres,
+            id, imdb_id, tmdb_id, title, year, poster_path, genres, imdb_rating, imdb_votes, tmdb_rating, tmdb_votes,
             theatrical_date, theatrical_region, digital_date, digital_region,
             watch_providers(region, provider_name, offer_type, display_priority)
           )`,
@@ -211,6 +231,7 @@ export function useRadar(region: string, window: "recent" | "upcoming") {
           year: m.year,
           posterPath: m.poster_path,
           genres: m.genres ?? [],
+          imdbRating: m.imdb_rating, imdbVotes: m.imdb_votes, tmdbRating: m.tmdb_rating, tmdbVotes: m.tmdb_votes,
           theatricalDate: m.theatrical_date,
           theatricalRegion: m.theatrical_region,
           digitalDate: m.digital_date,

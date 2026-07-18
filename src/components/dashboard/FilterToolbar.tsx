@@ -13,8 +13,15 @@ const SORT_LABELS: Record<SortKey, string> = {
   theatrical: "Theatrical date",
   status: "Status",
   year: "Year",
+  rating: "Rating",
 };
-const SORT_KEYS: SortKey[] = ["digital", "theatrical", "title", "status", "year"];
+const SORT_KEYS: SortKey[] = ["digital", "theatrical", "title", "status", "year", "rating"];
+const VOTE_PRESETS: { label: string; value: number | null }[] = [
+  { label: "Any popularity", value: null },
+  { label: "1k+ votes", value: 1000 },
+  { label: "10k+ votes", value: 10000 },
+  { label: "100k+ votes", value: 100000 },
+];
 
 /**
  * The table's sort + filter toolbar (SPEC §10): a sort control with every field
@@ -36,7 +43,7 @@ export function FilterToolbar({
   onFiltersChange: (f: Filters) => void;
 }) {
   const clearAll = () =>
-    onFiltersChange({ providers: [], genres: [], yearMin: null, yearMax: null });
+    onFiltersChange({ providers: [], genres: [], yearMin: null, yearMax: null, minVotes: null });
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -106,6 +113,17 @@ export function FilterToolbar({
           />
         </div>
       )}
+
+      <select
+        className="select select-sm select-bordered w-auto"
+        aria-label="Minimum popularity"
+        value={filters.minVotes ?? ""}
+        onChange={(e) => onFiltersChange({ ...filters, minVotes: e.target.value ? Number(e.target.value) : null })}
+      >
+        {VOTE_PRESETS.map((p) => (
+          <option key={p.label} value={p.value ?? ""}>{p.label}</option>
+        ))}
+      </select>
 
       {filtersActive(filters) && (
         <button className="btn btn-ghost btn-sm" onClick={clearAll}>
