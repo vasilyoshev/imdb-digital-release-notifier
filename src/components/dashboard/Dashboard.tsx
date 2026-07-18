@@ -151,7 +151,10 @@ export function Dashboard({ region }: { region: string }) {
       />
 
       <div className="grid items-start gap-4 lg:grid-cols-[1fr_20rem]">
-        <div>
+        {/* min-w-0: grid items default to min-width:auto and won't shrink below
+            their content, which let the movie list (and its overflow-x-auto
+            table) blow past the viewport on mobile — clamp it to the column. */}
+        <div className="min-w-0">
           {source.isError ? (
             <LoadError message={(source.error as Error).message} />
           ) : source.isLoading ? (
