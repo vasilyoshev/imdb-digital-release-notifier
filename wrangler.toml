@@ -1,0 +1,9 @@
+# Cloudflare Workers static-assets deploy (Netlify-exit spec §4b,
+# control-tower docs/migrations/netlify-exit.md). Pure assets Worker — no
+# Worker code; SPA fallback replaces the netlify.toml /* → /index.html rewrite.
+name = "release-notifier"
+compatibility_date = "2026-07-01"
+
+[assets]
+directory = "./dist"
+not_found_handling = "single-page-application"
