@@ -1,6 +1,6 @@
 import { statusOf, type Movie } from "../../lib/dashboard";
 import type { SortKey, SortState } from "../../lib/table-controls";
-import { DateCell, Poster, ProviderChip, RatingCell, StatusBadge } from "./atoms";
+import { DateCell, Poster, RatingCell, StatusBadge } from "./atoms";
 
 /**
  * The dense watchlist table (SPEC §9). On md+ it's a real table with clickable
@@ -13,14 +13,12 @@ export function MovieList({
   sort,
   onToggleSort,
   onSelect,
-  region = "BG",
 }: {
   movies: Movie[];
   today: string;
   sort: SortState;
   onToggleSort: (key: SortKey) => void;
   onSelect: (movieId: number) => void;
-  region?: string;
 }) {
   if (movies.length === 0) {
     return (
@@ -44,7 +42,6 @@ export function MovieList({
               <SortableTh label="Status" sortKey="status" sort={sort} onToggle={onToggleSort} />
               <SortableTh label="Theatrical" sortKey="theatrical" sort={sort} onToggle={onToggleSort} />
               <SortableTh label="Digital" sortKey="digital" sort={sort} onToggle={onToggleSort} />
-              <th>Where to watch ({region})</th>
             </tr>
           </thead>
           <tbody>
@@ -74,9 +71,6 @@ export function MovieList({
                 </td>
                 <td>
                   <DateCell date={m.digitalDate} region={m.digitalRegion} />
-                </td>
-                <td>
-                  <ProviderCell movie={m} />
                 </td>
               </tr>
             ))}
@@ -117,11 +111,6 @@ export function MovieList({
                     <DateCell date={m.digitalDate} region={m.digitalRegion} />
                   </dd>
                 </dl>
-                {m.providersBG.length > 0 && (
-                  <div className="mt-2">
-                    <ProviderCell movie={m} />
-                  </div>
-                )}
               </div>
             </div>
           </div>
@@ -156,18 +145,5 @@ function SortableTh({
         </span>
       </button>
     </th>
-  );
-}
-
-function ProviderCell({ movie }: { movie: Movie }) {
-  if (movie.providersBG.length === 0) {
-    return <span className="opacity-40">—</span>;
-  }
-  return (
-    <div className="flex flex-wrap gap-1">
-      {movie.providersBG.map((p) => (
-        <ProviderChip key={`${p.name}-${p.kind}`} provider={p} />
-      ))}
-    </div>
   );
 }
