@@ -59,16 +59,30 @@ export function StatusBadge({
   );
 }
 
-/** Score + vote count — IMDb when available, else TMDB (shown in the tooltip). */
+/** Score + votes, with the source shown so a TMDB fallback isn't mistaken for an
+ *  IMDb number. Unrated titles (e.g. unreleased) fall back to TMDB's popularity
+ *  "buzz" so the column still says something on the Upcoming radar. */
 export function RatingCell({ movie }: { movie: Movie }) {
   const r = effectiveRating(movie);
-  if (!r) return <span className="opacity-40">—</span>;
-  return (
-    <span className="whitespace-nowrap" title={`${r.source} rating`}>
-      <span className="text-amber-400">★</span> {r.score.toFixed(1)}
-      {r.votes > 0 && <span className="ml-1 text-xs opacity-50">{fmtVotes(r.votes)}</span>}
-    </span>
-  );
+  if (r) {
+    return (
+      <span className="whitespace-nowrap" title={`${r.source} rating`}>
+        <span className="text-amber-400">★</span> {r.score.toFixed(1)}
+        {r.votes > 0 && <span className="ml-1 text-xs opacity-50">{fmtVotes(r.votes)}</span>}
+        <span className="ml-1 align-middle text-[10px] uppercase opacity-40">
+          {r.source === "IMDb" ? "IMDb" : "TMDb"}
+        </span>
+      </span>
+    );
+  }
+  if (movie.popularity != null) {
+    return (
+      <span className="whitespace-nowrap text-xs opacity-70" title="TMDB popularity — pre-release buzz">
+        🔥 {Math.round(movie.popularity)}
+      </span>
+    );
+  }
+  return <span className="opacity-40">—</span>;
 }
 
 export function ProviderChip({ provider }: { provider: Provider }) {

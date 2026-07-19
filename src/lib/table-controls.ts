@@ -7,7 +7,15 @@
  */
 import { effectiveRating, effectiveVotes, type Movie, STATUS_ORDER, statusOf } from "./dashboard";
 
-export type SortKey = "title" | "digital" | "theatrical" | "status" | "year" | "rating";
+export type SortKey =
+  | "title"
+  | "digital"
+  | "theatrical"
+  | "status"
+  | "year"
+  | "rating"
+  | "popularity"
+  | "added";
 export type SortDir = "asc" | "desc";
 
 export interface SortState {
@@ -38,6 +46,8 @@ const DEFAULT_DIR: Record<SortKey, SortDir> = {
   status: "asc", // ladder order: Out now first
   year: "desc",
   rating: "desc", // highest-rated first
+  popularity: "desc", // most-hyped first
+  added: "desc", // most-recently-added first
 };
 
 export function defaultControls(): TableControls {
@@ -108,6 +118,10 @@ function compareBy(a: Movie, b: Movie, key: SortKey, today: string): number {
       return nullsLastNum(a.year, b.year);
     case "rating":
       return nullsLastNum(effectiveRating(a)?.score ?? null, effectiveRating(b)?.score ?? null);
+    case "popularity":
+      return nullsLastNum(a.popularity, b.popularity);
+    case "added":
+      return nullsLastStr(a.addedAt, b.addedAt);
     case "digital":
       return nullsLastStr(a.digitalDate, b.digitalDate);
     case "theatrical":
@@ -149,18 +163,19 @@ export function applyControls(movies: Movie[], controls: TableControls, today: s
 
 const KEY_PREFIX = "table-controls:";
 
-export function loadControls(listId: number | string): TableControls {
+export function loadControls(listId: number | string, defaultSort?: SortState): TableControls {
+  const d = defaultControls();
+  if (defaultSort) d.sort = defaultSort;
   try {
     const raw = localStorage.getItem(KEY_PREFIX + listId);
-    if (!raw) return defaultControls();
+    if (!raw) return d;
     const parsed = JSON.parse(raw) as Partial<TableControls>;
-    const d = defaultControls();
     return {
       sort: parsed.sort ?? d.sort,
       filters: { ...d.filters, ...parsed.filters },
     };
   } catch {
-    return defaultControls();
+    return d;
   }
 }
 
