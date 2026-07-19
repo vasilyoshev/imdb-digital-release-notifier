@@ -385,6 +385,25 @@ export async function getDigitalDatesForRegion(
   return new Map(rows.map((r) => [r.movie_id, r.release_date]));
 }
 
+/** Movie ids that clear the radar quality gate (#9): have an IMDb page AND at
+ * least `minVotes` IMDb votes, so the public radar excludes obscure/unrated
+ * junk. Rows with a null imdb_id or null imdb_votes never match. */
+export async function getRadarQualifiedIds(
+  db: SupabaseClient,
+  movieIds: number[],
+  minVotes: number,
+): Promise<Set<number>> {
+  if (!movieIds.length) return new Set();
+  const rows = unwrap<{ id: number }[]>(
+    await db.from("movies").select("id")
+      .in("id", movieIds)
+      .not("imdb_id", "is", null)
+      .gte("imdb_votes", minVotes),
+    "getRadarQualifiedIds",
+  );
+  return new Set(rows.map((r) => r.id));
+}
+
 /** Replace all radar_entries for one region × window (SPEC §4/§7). */
 export async function replaceRadarEntries(
   db: SupabaseClient,

@@ -25,6 +25,16 @@ export interface UpcomingEvent {
   region: string | null;
 }
 
+/** A movie that's out in theaters but has no digital date announced yet — it
+ *  belongs on the Upcoming rail (a digital release is coming) even though there's
+ *  no date to place it at. Mirrors the "Awaiting digital" status. */
+export interface AwaitingMovie {
+  movieId: number;
+  title: string;
+  theatricalDate: string;
+  region: string | null;
+}
+
 export interface LogEntry {
   id: number;
   channel: "push" | "email";
@@ -64,6 +74,31 @@ export function upcomingFrom(
     }
   }
   return events.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/** Active movies awaiting a digital release: theatrical is out (within the last
+ *  year — matching the "Awaiting digital" status), no digital date yet. Undated,
+ *  so listed most-recent-theatrical first. */
+export function awaitingFrom(
+  movies: ActiveMovie[],
+  today = todayISO(),
+): AwaitingMovie[] {
+  const oneYearAgo = `${Number(today.slice(0, 4)) - 1}${today.slice(4)}`;
+  return movies
+    .filter(
+      (m) =>
+        !m.digitalDate &&
+        m.theatricalDate != null &&
+        m.theatricalDate <= today &&
+        m.theatricalDate >= oneYearAgo,
+    )
+    .map((m) => ({
+      movieId: m.id,
+      title: m.title ?? "Untitled",
+      theatricalDate: m.theatricalDate!,
+      region: m.theatricalRegion,
+    }))
+    .sort((a, b) => b.theatricalDate.localeCompare(a.theatricalDate));
 }
 
 /** One-line description of a logged event for the History feed. */

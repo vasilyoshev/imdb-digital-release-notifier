@@ -38,9 +38,10 @@ export interface RadarRow {
 
 /**
  * Verify discover candidates against their hydrated per-region digital date and
- * rank them (SPEC §4 "trust but verify"): drop any movie whose real digital date
- * for this region is missing or falls outside the window (discover's top-level
- * date leaks), dedupe, then rank — newest-first for recent, soonest-first for
+ * rank them (SPEC §4 "trust but verify"): drop any movie that fails the quality
+ * gate (#9 — no IMDb page / too few votes), or whose real digital date for this
+ * region is missing or falls outside the window (discover's top-level date
+ * leaks), dedupe, then rank — newest-first for recent, soonest-first for
  * upcoming. `rank` is dense from 0 in that order.
  */
 export function buildRadarRows(
@@ -49,11 +50,13 @@ export function buildRadarRows(
   window: RadarWindow,
   range: DateRange,
   digitalDateOf: Map<number, string>,
+  qualified: Set<number>,
 ): RadarRow[] {
   const seen = new Set<number>();
   const kept: { movie_id: number; digital_date: string }[] = [];
   for (const id of movieIds) {
     if (seen.has(id)) continue;
+    if (!qualified.has(id)) continue; // #9 quality gate: no IMDb page / too few votes
     const dd = digitalDateOf.get(id);
     if (!dd || dd < range.gte || dd > range.lte) continue; // leak / unhydrated → skip
     seen.add(id);

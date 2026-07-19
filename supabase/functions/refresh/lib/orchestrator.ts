@@ -8,6 +8,7 @@ import {
   getDeliverableEvents,
   getDeliveredEventIds,
   getDigitalDatesForRegion,
+  getRadarQualifiedIds,
   getLastUserRefreshAt,
   getLogStates,
   getMemberships,
@@ -54,6 +55,9 @@ const RADAR_DISCOVER_LIMIT = Number(Deno.env.get("RADAR_DISCOVER_LIMIT") ?? "60"
 const RADAR_RECENT_DAYS = Number(Deno.env.get("RADAR_RECENT_DAYS") ?? "45");
 const RADAR_UPCOMING_DAYS = Number(Deno.env.get("RADAR_UPCOMING_DAYS") ?? "90");
 const RADAR_FRESH_HOURS = Number(Deno.env.get("RADAR_FRESH_HOURS") ?? "20");
+// #9 quality gate: the public radar only lists titles with an IMDb page and at
+// least this many IMDb votes — keeps obscure/unrated junk out.
+const RADAR_MIN_IMDB_VOTES = Number(Deno.env.get("RADAR_MIN_IMDB_VOTES") ?? "1000");
 const RADAR_WINDOWS: RadarWindow[] = ["recent", "upcoming"];
 
 // Per-user Refresh-now (SPEC §8): only re-hydrate the caller's movies staler
@@ -249,7 +253,8 @@ async function runRadar(
       }
 
       const digitalByMovie = await getDigitalDatesForRegion(db, movieIds, region);
-      const rows = buildRadarRows(movieIds, region, window, range, digitalByMovie);
+      const qualified = await getRadarQualifiedIds(db, movieIds, RADAR_MIN_IMDB_VOTES);
+      const rows = buildRadarRows(movieIds, region, window, range, digitalByMovie, qualified);
       await replaceRadarEntries(db, region, window, rows);
       entries += rows.length;
       regionEntries += rows.length;
