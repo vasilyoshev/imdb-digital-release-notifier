@@ -9,6 +9,7 @@ import {
   getDeliveredEventIds,
   getDigitalDatesForRegion,
   getRadarQualifiedIds,
+  getRadarSeedIds,
   getLastUserRefreshAt,
   getLogStates,
   getMemberships,
@@ -252,9 +253,13 @@ async function runRadar(
         movieIds.push(movie.id);
       }
 
-      const digitalByMovie = await getDigitalDatesForRegion(db, movieIds, region);
-      const qualified = await getRadarQualifiedIds(db, movieIds, RADAR_MIN_IMDB_VOTES);
-      const rows = buildRadarRows(movieIds, region, window, range, digitalByMovie, qualified);
+      // Seed from our own catalog too — discover only returns the newest-by-date
+      // page and buries quality titles under obscure daily releases.
+      const seedIds = await getRadarSeedIds(db, region, range.gte, range.lte);
+      const allIds = [...new Set([...movieIds, ...seedIds])];
+      const digitalByMovie = await getDigitalDatesForRegion(db, allIds, region);
+      const qualified = await getRadarQualifiedIds(db, allIds, RADAR_MIN_IMDB_VOTES);
+      const rows = buildRadarRows(allIds, region, window, range, digitalByMovie, qualified);
       await replaceRadarEntries(db, region, window, rows);
       entries += rows.length;
       regionEntries += rows.length;
