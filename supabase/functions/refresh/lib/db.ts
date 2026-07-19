@@ -385,6 +385,26 @@ export async function getDigitalDatesForRegion(
   return new Map(rows.map((r) => [r.movie_id, r.release_date]));
 }
 
+/** Radar candidates seeded from our own catalog (follow-up): movie ids that
+ * already have a verified per-region digital release inside the window. TMDb
+ * discover only returns the newest-by-date page, which buries quality titles
+ * under a flood of obscure daily releases; seeding from what we already know
+ * surfaces them. The caller still gates + ranks these. */
+export async function getRadarSeedIds(
+  db: SupabaseClient,
+  region: string,
+  gte: string,
+  lte: string,
+): Promise<number[]> {
+  const rows = unwrap<{ movie_id: number }[]>(
+    await db.from("release_dates").select("movie_id")
+      .eq("region", region).eq("medium", "digital")
+      .gte("release_date", gte).lte("release_date", lte),
+    "getRadarSeedIds",
+  );
+  return [...new Set(rows.map((r) => r.movie_id))];
+}
+
 /** Movie ids that clear the radar quality gate (#9): have an IMDb page AND at
  * least `minVotes` IMDb votes, so the public radar excludes obscure/unrated
  * junk. Rows with a null imdb_id or null imdb_votes never match. */
