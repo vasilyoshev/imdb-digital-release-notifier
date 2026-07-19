@@ -56,7 +56,13 @@ export function Dashboard({ region }: { region: string }) {
   // Controls persist per surface: radar keys on region×window, lists on id.
   const controlsKey = onRadar ? `radar:${region}:${radarWindow}` : `list:${activeTab}`;
   useEffect(() => {
-    setControls(loadControls(controlsKey));
+    // Upcoming is about what lands soonest → default to earliest digital date first.
+    const defaultSort = onRadar && radarWindow === "upcoming"
+      ? ({ key: "digital", dir: "asc" } as const)
+      : undefined;
+    setControls(loadControls(controlsKey, defaultSort));
+    // controlsKey encodes region×window, so it changes whenever the surface does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controlsKey]);
 
   const updateControls = (next: TableControls) => {

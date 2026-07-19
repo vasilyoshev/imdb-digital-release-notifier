@@ -64,8 +64,9 @@ export function Navbar({
         )}
       </div>
 
-      {/* Search: its own full-width row on mobile (the navbar wraps), inline on ≥sm. */}
-      <div className="order-last w-full sm:order-none sm:w-auto">
+      {/* Search: its own full-width row on mobile (the navbar wraps), inline on ≥sm
+          with a gap before the region/actions cluster. */}
+      <div className="order-last w-full sm:order-none sm:mr-2 sm:w-auto">
         <NavbarSearch />
       </div>
 

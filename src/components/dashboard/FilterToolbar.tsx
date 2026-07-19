@@ -14,8 +14,19 @@ const SORT_LABELS: Record<SortKey, string> = {
   status: "Status",
   year: "Year",
   rating: "Rating",
+  popularity: "Popularity",
+  added: "Date added",
 };
-const SORT_KEYS: SortKey[] = ["digital", "theatrical", "title", "status", "year", "rating"];
+const SORT_KEYS: SortKey[] = [
+  "digital",
+  "theatrical",
+  "added",
+  "rating",
+  "popularity",
+  "year",
+  "title",
+  "status",
+];
 const VOTE_PRESETS: { label: string; value: number | null }[] = [
   { label: "Any popularity", value: null },
   { label: "1k+ votes", value: 1000 },

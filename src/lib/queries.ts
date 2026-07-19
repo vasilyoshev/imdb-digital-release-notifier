@@ -44,6 +44,7 @@ export function useLists(enabled = true) {
 
 // The nested shape supabase-js returns for the membership → movie → providers embed.
 interface MembershipRow {
+  added_at: string | null;
   movie: {
     id: number;
     imdb_id: string | null;
@@ -56,6 +57,7 @@ interface MembershipRow {
     imdb_votes: number | null;
     tmdb_rating: number | null;
     tmdb_votes: number | null;
+    popularity: number | null;
     theatrical_date: string | null;
     theatrical_region: string | null;
     digital_date: string | null;
@@ -82,8 +84,8 @@ export function useListMovies(listId: number | undefined) {
       const { data, error } = await supabase
         .from("list_memberships")
         .select(
-          `movie:movies!inner(
-            id, imdb_id, tmdb_id, title, year, poster_path, genres, imdb_rating, imdb_votes, tmdb_rating, tmdb_votes,
+          `added_at, movie:movies!inner(
+            id, imdb_id, tmdb_id, title, year, poster_path, genres, imdb_rating, imdb_votes, tmdb_rating, tmdb_votes, popularity,
             theatrical_date, theatrical_region, digital_date, digital_region,
             watch_providers(region, provider_name, offer_type, display_priority)
           )`,
@@ -94,23 +96,26 @@ export function useListMovies(listId: number | undefined) {
 
       const rows = (data ?? []) as unknown as MembershipRow[];
       return rows
-        .map((r) => r.movie)
-        .filter((m): m is NonNullable<MembershipRow["movie"]> => m != null)
-        .map((m) => ({
-          id: m.id,
-          imdbId: m.imdb_id,
-          tmdbId: m.tmdb_id,
-          title: m.title,
-          year: m.year,
-          posterPath: m.poster_path,
-          genres: m.genres ?? [],
-          imdbRating: m.imdb_rating, imdbVotes: m.imdb_votes, tmdbRating: m.tmdb_rating, tmdbVotes: m.tmdb_votes,
-          theatricalDate: m.theatrical_date,
-          theatricalRegion: m.theatrical_region,
-          digitalDate: m.digital_date,
-          digitalRegion: m.digital_region,
-          providersBG: toProvidersBG(m.watch_providers),
-        }));
+        .filter((r): r is MembershipRow & { movie: NonNullable<MembershipRow["movie"]> } => r.movie != null)
+        .map((r) => {
+          const m = r.movie;
+          return {
+            id: m.id,
+            imdbId: m.imdb_id,
+            tmdbId: m.tmdb_id,
+            title: m.title,
+            year: m.year,
+            posterPath: m.poster_path,
+            genres: m.genres ?? [],
+            imdbRating: m.imdb_rating, imdbVotes: m.imdb_votes, tmdbRating: m.tmdb_rating, tmdbVotes: m.tmdb_votes,
+            popularity: m.popularity, addedAt: r.added_at,
+            theatricalDate: m.theatrical_date,
+            theatricalRegion: m.theatrical_region,
+            digitalDate: m.digital_date,
+            digitalRegion: m.digital_region,
+            providersBG: toProvidersBG(m.watch_providers),
+          };
+        });
     },
   });
 }
@@ -210,7 +215,7 @@ export function useRadar(region: string, window: "recent" | "upcoming") {
         .from("radar_entries")
         .select(
           `rank, movie:movies!inner(
-            id, imdb_id, tmdb_id, title, year, poster_path, genres, imdb_rating, imdb_votes, tmdb_rating, tmdb_votes,
+            id, imdb_id, tmdb_id, title, year, poster_path, genres, imdb_rating, imdb_votes, tmdb_rating, tmdb_votes, popularity,
             theatrical_date, theatrical_region, digital_date, digital_region,
             watch_providers(region, provider_name, offer_type, display_priority)
           )`,
@@ -232,6 +237,7 @@ export function useRadar(region: string, window: "recent" | "upcoming") {
           posterPath: m.poster_path,
           genres: m.genres ?? [],
           imdbRating: m.imdb_rating, imdbVotes: m.imdb_votes, tmdbRating: m.tmdb_rating, tmdbVotes: m.tmdb_votes,
+          popularity: m.popularity, addedAt: null,
           theatricalDate: m.theatrical_date,
           theatricalRegion: m.theatrical_region,
           digitalDate: m.digital_date,
@@ -309,6 +315,7 @@ export interface MovieDetail {
   overview: string | null;
   trailerKey: string | null;
   tmdbId: number | null;
+  imdbId: string | null;
   releaseDates: { region: string; medium: "theatrical" | "digital"; releaseDate: string }[];
   rawProviders: RawProvider[];
 }
@@ -321,6 +328,7 @@ interface MovieDetailRow {
   overview: string | null;
   trailer_key: string | null;
   tmdb_id: number | null;
+  imdb_id: string | null;
   release_dates: { region: string; medium: "theatrical" | "digital"; release_date: string }[];
   watch_providers: RawProvider[];
 }
@@ -338,7 +346,7 @@ export function useMovieDetail(movieId: number | null) {
       const { data, error } = await supabase
         .from("movies")
         .select(
-          `id, title, year, poster_path, overview, trailer_key, tmdb_id,
+          `id, title, year, poster_path, overview, trailer_key, tmdb_id, imdb_id,
            release_dates(region, medium, release_date),
            watch_providers(region, provider_name, offer_type, display_priority)`,
         )
@@ -354,6 +362,7 @@ export function useMovieDetail(movieId: number | null) {
         overview: m.overview,
         trailerKey: m.trailer_key,
         tmdbId: m.tmdb_id,
+        imdbId: m.imdb_id,
         releaseDates: (m.release_dates ?? []).map((r) => ({
           region: r.region,
           medium: r.medium,

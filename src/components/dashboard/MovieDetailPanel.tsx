@@ -51,6 +51,16 @@ export function MovieDetailPanel({
           <div className="min-w-0 flex-1">
             <h2 className="text-lg leading-tight font-semibold">{m?.title ?? "…"}</h2>
             {m?.year != null && <p className="text-sm opacity-60">{m.year}</p>}
+            {m?.imdbId && (
+              <a
+                href={`https://www.imdb.com/title/${m.imdbId}/`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-amber-400 hover:underline"
+              >
+                View on IMDb ↗
+              </a>
+            )}
           </div>
           <button className="btn btn-ghost btn-sm btn-circle" onClick={onClose} aria-label="Close">
             ✕
