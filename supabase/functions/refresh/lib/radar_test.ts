@@ -17,7 +17,8 @@ Deno.test("buildRadarRows filters out-of-window leaks and unhydrated, ranks rece
     [4, "2026-05-01"], // leak: before gte → drop
     // 5 has no hydrated date → drop
   ]);
-  assertEquals(buildRadarRows([1, 2, 3, 4, 5], "US", "recent", range, digital), [
+  const all = new Set([1, 2, 3, 4, 5]);
+  assertEquals(buildRadarRows([1, 2, 3, 4, 5], "US", "recent", range, digital, all), [
     { region: "US", window: "recent", movie_id: 3, rank: 0, digital_date: "2026-07-15" },
     { region: "US", window: "recent", movie_id: 1, rank: 1, digital_date: "2026-07-10" },
   ]);
@@ -26,8 +27,24 @@ Deno.test("buildRadarRows filters out-of-window leaks and unhydrated, ranks rece
 Deno.test("buildRadarRows ranks upcoming soonest-first and dedupes", () => {
   const range = { gte: "2026-07-17", lte: "2026-10-15" };
   const digital = new Map<number, string>([[7, "2026-09-01"], [8, "2026-08-01"]]);
-  assertEquals(buildRadarRows([7, 8, 7], "GB", "upcoming", range, digital), [
+  const all = new Set([7, 8]);
+  assertEquals(buildRadarRows([7, 8, 7], "GB", "upcoming", range, digital, all), [
     { region: "GB", window: "upcoming", movie_id: 8, rank: 0, digital_date: "2026-08-01" },
     { region: "GB", window: "upcoming", movie_id: 7, rank: 1, digital_date: "2026-09-01" },
+  ]);
+});
+
+Deno.test("buildRadarRows drops movies that fail the quality gate (#9)", () => {
+  const range = { gte: "2026-06-02", lte: "2026-07-17" };
+  const digital = new Map<number, string>([
+    [1, "2026-07-10"],
+    [2, "2026-07-12"],
+    [3, "2026-07-15"],
+  ]);
+  // Only 1 and 3 clear the IMDb quality gate; 2 is dropped despite a valid date.
+  const qualified = new Set([1, 3]);
+  assertEquals(buildRadarRows([1, 2, 3], "US", "recent", range, digital, qualified), [
+    { region: "US", window: "recent", movie_id: 3, rank: 0, digital_date: "2026-07-15" },
+    { region: "US", window: "recent", movie_id: 1, rank: 1, digital_date: "2026-07-10" },
   ]);
 });
