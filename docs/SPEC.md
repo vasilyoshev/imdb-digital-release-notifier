@@ -27,7 +27,7 @@ Plus a **Stremio addon** ("Digital Release Radar") exposing the two public radar
 | Backend | **Supabase, self-hosted** (Docker, on yoshevbot-1) at `api.notifier.yoshevbot.uk`: Postgres, GoTrue Auth (**Google-OAuth-only open signup**, §3), **Edge Functions** (pipeline + `search` + `follow` + `delete-account`), **pg_cron + pg_net** scheduling. |
 | Release data | **TMDB only**. Supported regions: a curated app-level set (§4); per-user cascade an ordered subset of it. |
 | List sources | IMDb's unauthenticated **GraphQL API** (per-user watchlists) + in-app **follow** (manual lists). TMDb-Discover per-user lists are **dropped** ([#48](https://github.com/vasilyoshev/imdb-digital-release-notifier/issues/48)) — the shared Radar replaces them. |
-| Email | **Resend** — **owner-only** digests. No SMTP anywhere in the stack (§3). |
+| Email | **AWS SES** (v2 API, SigV4 via `aws4fetch`) — **owner-only** digests from `send.yoshevbot.uk`. No SMTP anywhere in the stack (§3). |
 | Push | Web Push from the Edge Function via **`jsr:@negrel/webpush`** — all users. |
 
 **Flow:** detection is global, delivery is per-user. Three cron jobs (§8): a **daily full refresh** (sync all lists, hydrate the movie union once, compute the Radar, detect Movie Events), an **hourly change tick** (re-hydrate only TMDB-reported changes), and an **hourly delivery job** (each user's gate hour in their own timezone). Per-user **Refresh now** and the `follow`/`search` edge functions round out the write paths.

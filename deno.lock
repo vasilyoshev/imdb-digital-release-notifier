@@ -3,6 +3,7 @@
   "specifiers": {
     "jsr:@negrel/http-ece@0.7.0": "0.7.0",
     "jsr:@negrel/webpush@0.5.0": "0.5.0",
+    "jsr:@std/assert@*": "1.0.19",
     "jsr:@std/assert@1": "1.0.19",
     "jsr:@std/bytes@1": "1.0.6",
     "jsr:@std/encoding@1": "1.0.11",
@@ -15,6 +16,7 @@
     "npm:@types/react-dom@19": "19.2.3_@types+react@19.2.17",
     "npm:@types/react@19": "19.2.17",
     "npm:@vitejs/plugin-react@^4.3.4": "4.7.0_vite@6.4.3",
+    "npm:aws4fetch@1.0.20": "1.0.20",
     "npm:daisyui@^5.0.50": "5.6.18",
     "npm:deno@^2.9.2": "2.9.2",
     "npm:eslint-plugin-react-hooks@^5.1.0": "5.2.0_eslint@9.39.5",
@@ -1774,6 +1776,9 @@
       "dependencies": [
         "possible-typed-array-names"
       ]
+    },
+    "aws4fetch@1.0.20": {
+      "integrity": "sha512-/djoAN709iY65ETD6LKCtyyEI04XIBP5xVvfmNxsEP0uJB5tyaGBztSryRr4HqMStr9R06PisQE7m9zDTXKu6g=="
     },
     "babel-plugin-polyfill-corejs2@0.4.17_@babel+core@7.29.7": {
       "integrity": "sha512-aTyf30K/rqAsNwN76zYrdtx8obu0E4KoUME29B1xj+B3WxgvWkp943vYQ+z8Mv3lw9xHXMHpvSPOBxzAkIa94w==",

@@ -650,14 +650,21 @@ async function deliverUser(
     };
   });
 
-  // Email digest — owner only, honored only when configured.
-  const resendKey = Deno.env.get("RESEND_API_KEY");
+  // Email digest — owner only, honored only when SES is configured.
+  const sesKeyId = Deno.env.get("SES_ACCESS_KEY_ID");
+  const sesSecret = Deno.env.get("SES_SECRET_ACCESS_KEY");
+  const sesRegion = Deno.env.get("SES_REGION");
   const emailSent: number[] = [];
-  if (isOwner && resendKey && settings.notify_email) {
+  if (isOwner && sesKeyId && sesSecret && sesRegion && settings.notify_email) {
     try {
       const digest = buildDigest(digestEvents, appUrl);
       if (digest) {
-        await sendDigest(resendKey, Deno.env.get("NOTIFY_FROM") ?? "onboarding@resend.dev", settings.notify_email, digest);
+        await sendDigest(
+          { accessKeyId: sesKeyId, secretAccessKey: sesSecret, region: sesRegion },
+          Deno.env.get("NOTIFY_FROM") ?? "IMDb Release Notifier <noreply@send.yoshevbot.uk>",
+          settings.notify_email,
+          digest,
+        );
         emailSent.push(...toSend.map((e) => e.id));
       }
     } catch (err) {
