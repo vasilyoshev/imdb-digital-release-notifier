@@ -173,7 +173,6 @@ export function Dashboard({ region }: { region: string }) {
             <MovieList
               movies={rows}
               today={today}
-              region={onRadar ? region : "BG"}
               sort={controls.sort}
               onToggleSort={(key) => updateControls({ ...controls, sort: toggleSort(controls.sort, key) })}
               onSelect={setSelectedMovieId}
