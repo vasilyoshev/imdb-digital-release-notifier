@@ -1,3 +1,4 @@
+import { AwsClient } from "npm:aws4fetch@1.0.20";
 import type { Medium } from "./types.ts";
 import type { EventKind } from "./events.ts";
 
@@ -43,17 +44,52 @@ export function buildDigest(
   return { subject, html };
 }
 
-export async function sendDigest(
-  apiKey: string,
+export interface SesConfig {
+  accessKeyId: string;
+  secretAccessKey: string;
+  /** SES region, e.g. "eu-central-1"; used for both the endpoint host and SigV4. */
+  region: string;
+}
+
+/** Pure SES v2 SendEmail payload for the owner digest. No I/O, so it's unit-testable. */
+export function buildSesPayload(
   from: string,
   to: string,
   digest: { subject: string; html: string },
-  fetchFn: typeof fetch = fetch,
+) {
+  return {
+    FromEmailAddress: from,
+    Destination: { ToAddresses: [to] },
+    Content: {
+      Simple: {
+        Subject: { Data: digest.subject, Charset: "UTF-8" },
+        Body: { Html: { Data: digest.html, Charset: "UTF-8" } },
+      },
+    },
+  };
+}
+
+export async function sendDigest(
+  ses: SesConfig,
+  from: string,
+  to: string,
+  digest: { subject: string; html: string },
 ): Promise<void> {
-  const res = await fetchFn("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-    body: JSON.stringify({ from, to: [to], subject: digest.subject, html: digest.html }),
+  const client = new AwsClient({
+    accessKeyId: ses.accessKeyId,
+    secretAccessKey: ses.secretAccessKey,
+    region: ses.region,
+    // SES signs under the "ses" service name; without this aws4fetch infers "email"
+    // from the email.<region>.amazonaws.com host and the signature fails.
+    service: "ses",
   });
-  if (!res.ok) throw new Error(`Resend HTTP ${res.status}: ${await res.text()}`);
+  const res = await client.fetch(
+    `https://email.${ses.region}.amazonaws.com/v2/email/outbound-emails`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(buildSesPayload(from, to, digest)),
+    },
+  );
+  if (!res.ok) throw new Error(`SES HTTP ${res.status}: ${await res.text()}`);
 }
