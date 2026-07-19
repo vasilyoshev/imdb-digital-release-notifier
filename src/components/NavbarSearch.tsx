@@ -12,28 +12,26 @@ const TMDB_IMG = "https://image.tmdb.org/t/p/w92";
 export function NavbarSearch() {
   const { user } = useAuth();
   const [q, setQ] = useState("");
+  const [debouncedQ, setDebouncedQ] = useState("");
   const [open, setOpen] = useState(false);
-  const [justFollowed, setJustFollowed] = useState<Set<number>>(new Set());
-  const search = useSearch();
   const follow = useFollow();
-  const { mutate: runSearch } = search;
-
-  // Debounced search on the query (signed-in only; anon never spends TMDb).
+  // Debounce the query into the key the search hook reads (signed-in only; anon
+  // never spends TMDb — the hook's `enabled` gate enforces that).
   useEffect(() => {
-    if (!user || q.trim().length < 2) return;
-    const t = setTimeout(() => runSearch(q), 300);
+    const t = setTimeout(() => setDebouncedQ(q), 300);
     return () => clearTimeout(t);
-  }, [q, user, runSearch]);
+  }, [q]);
+  const search = useSearch(debouncedQ, !!user);
 
-  const onFollow = (h: SearchHit) => {
-    follow.mutate(
-      { tmdbId: h.tmdbId, action: "follow" },
-      { onSuccess: () => setJustFollowed((s) => new Set(s).add(h.tmdbId)) },
-    );
+  const onToggleFollow = (h: SearchHit) => {
+    follow.mutate({ tmdbId: h.tmdbId, action: h.followed ? "unfollow" : "follow" });
   };
 
   const hits = search.data ?? [];
   const showDropdown = open && (!user || q.trim().length >= 1);
+  // Cover the debounce gap too, so we don't flash "No matches" before the query
+  // for the latest term has started.
+  const searching = search.isLoading || (q.trim().length >= 2 && debouncedQ.trim() !== q.trim());
 
   return (
     <div className="relative w-full sm:w-auto">
@@ -56,7 +54,7 @@ export function NavbarSearch() {
             <p className="p-3 text-sm">Sign up to search &amp; follow any movie.</p>
           ) : q.trim().length < 2 ? (
             <p className="p-3 text-sm opacity-60">Type to search…</p>
-          ) : search.isPending ? (
+          ) : searching ? (
             <div className="grid place-items-center py-4">
               <span className="loading loading-dots loading-md text-primary" />
             </div>
@@ -75,15 +73,30 @@ export function NavbarSearch() {
                     <div className="truncate text-sm font-medium">{h.title}</div>
                     <div className="text-xs opacity-60">
                       {h.year ?? "—"}
-                      {h.tracked && h.digitalDate ? ` · digital ${h.digitalDate}` : ""}
+                      {(h.followed || h.onWatchlist) && h.digitalDate ? ` · digital ${h.digitalDate}` : ""}
                     </div>
                   </div>
-                  {h.tracked || justFollowed.has(h.tmdbId) ? (
-                    <span className="badge badge-success badge-sm">Following</span>
+                  {h.followed ? (
+                    // Manual follow — toggleable. preventDefault keeps the input
+                    // focused so the dropdown stays open to show the flip.
+                    <button
+                      className="btn btn-success btn-xs"
+                      title="Unfollow"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => onToggleFollow(h)}
+                      disabled={follow.isPending}
+                    >
+                      ✓ Following
+                    </button>
+                  ) : h.onWatchlist ? (
+                    <span className="badge badge-outline badge-sm" title="On your IMDb watchlist">
+                      On watchlist
+                    </span>
                   ) : (
                     <button
                       className="btn btn-primary btn-xs"
-                      onClick={() => onFollow(h)}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => onToggleFollow(h)}
                       disabled={follow.isPending}
                     >
                       Follow

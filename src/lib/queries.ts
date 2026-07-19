@@ -256,14 +256,22 @@ export interface SearchHit {
   year: number | null;
   posterPath: string | null;
   overview: string | null;
-  tracked: boolean;
+  /** On the caller's manual Followed list — toggleable in the dropdown. */
+  followed: boolean;
+  /** On the caller's IMDb watchlist — shown as a status, not a toggle. */
+  onWatchlist: boolean;
   digitalDate: string | null;
 }
 
-/** TMDb search via the `search` edge function (bearer stays server-side). */
-export function useSearch() {
-  return useMutation({
-    mutationFn: async (q: string): Promise<SearchHit[]> => {
+/** TMDb search via the `search` edge function (bearer stays server-side). A
+ * query (not a mutation) keyed on the term, so a follow/unfollow anywhere
+ * invalidates it and the dropdown's Follow/Following state stays truthful. */
+export function useSearch(term: string, enabled: boolean) {
+  const q = term.trim();
+  return useQuery({
+    queryKey: ["search", q],
+    enabled: enabled && q.length >= 2,
+    queryFn: async (): Promise<SearchHit[]> => {
       const { data, error } = await supabase.functions.invoke("search", { body: { q } });
       if (error) throw error;
       const payload = data as { results?: SearchHit[]; error?: string } | null;
