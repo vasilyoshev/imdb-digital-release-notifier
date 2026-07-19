@@ -32,6 +32,27 @@ export function computeEffective(
 }
 
 /**
+ * A digital date implausibly long after the theatrical release is almost always a
+ * re-release / re-listing (a new platform picking up an old catalogue title),
+ * NOT the original digital drop — TMDB frequently records only that recent
+ * re-list for older films (e.g. *Up in the Air* (2009) shows a 2026 DE/FR digital
+ * date and nothing else). Surfacing it makes a 15-year-old film look freshly
+ * digital and sorts it to the top of a date-sorted list. When the gap exceeds
+ * `maxYears`, treat the digital date as unknown so the title reads as "long
+ * available" (—) rather than newly released. Direct-to-digital titles (no
+ * theatrical date) are never suppressed.
+ */
+export function isRereleaseDigital(
+  theatricalDate: string | null,
+  digitalDate: string | null,
+  maxYears = 3,
+): boolean {
+  if (!theatricalDate || !digitalDate) return false;
+  const gapMs = Date.parse(`${digitalDate}T00:00:00Z`) - Date.parse(`${theatricalDate}T00:00:00Z`);
+  return gapMs > maxYears * 365.25 * 24 * 60 * 60 * 1000;
+}
+
+/**
  * The single global region cascade that drives the shared movie_events stream
  * (SPEC §8 job 1: "recompute effective dates per the union of user cascades").
  *

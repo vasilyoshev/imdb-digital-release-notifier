@@ -31,7 +31,7 @@ import {
 import { fetchWatchlist } from "./imdb.ts";
 import { fetchImdbRating } from "./omdb.ts";
 import { fetchChanges, fetchDiscover, fetchMovieBundle, findTmdbId } from "./tmdb.ts";
-import { buildGlobalCascade, computeEffective, dateInZone, hourInZone } from "./dates.ts";
+import { buildGlobalCascade, computeEffective, dateInZone, hourInZone, isRereleaseDigital } from "./dates.ts";
 import { detectMediumEvents, type MediumLogState } from "./events.ts";
 import { selectDeliveries, selectForHydration } from "./pipeline.ts";
 import { buildRadarRows, radarWindow, type RadarWindow } from "./radar.ts";
@@ -122,13 +122,23 @@ export async function applyBundle(
   await replaceReleaseDates(db, movie.id, bundle.rawDates);
   await replaceProviders(db, movie.id, bundle.providers);
 
-  const effByMedium = {} as Record<Medium, string | null>;
-  for (const medium of MEDIUMS) {
-    const eff = computeEffective(bundle.rawDates, globalCascade, medium);
-    patch[`${medium}_date`] = eff?.date ?? null;
-    patch[`${medium}_region`] = eff?.region ?? null;
-    effByMedium[medium] = eff?.date ?? null;
+  const theatrical = computeEffective(bundle.rawDates, globalCascade, "theatrical");
+  let digital = computeEffective(bundle.rawDates, globalCascade, "digital");
+  // Drop a digital date that's implausibly long after theatrical — it's a
+  // re-release/re-listing, not the original digital drop (TMDB often has only
+  // that for old catalogue titles). Keeps 15-year-old films from showing a bogus
+  // future digital date + sorting to the top.
+  if (digital && theatrical && isRereleaseDigital(theatrical.date, digital.date)) {
+    digital = null;
   }
+  const effByMedium: Record<Medium, string | null> = {
+    theatrical: theatrical?.date ?? null,
+    digital: digital?.date ?? null,
+  };
+  patch.theatrical_date = theatrical?.date ?? null;
+  patch.theatrical_region = theatrical?.region ?? null;
+  patch.digital_date = digital?.date ?? null;
+  patch.digital_region = digital?.region ?? null;
   await updateMovie(db, movie.id, patch);
   movie.refreshed_at = nowIso;
   return effByMedium;
