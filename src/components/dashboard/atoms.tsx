@@ -1,8 +1,9 @@
 import {
-  effectiveRating,
+  allRatings,
   fmtFull,
   fmtVotes,
   PROVIDER_KIND_CLASS,
+  ratingSourceLabel,
   STATUS_BADGE,
   type DerivedStatus,
   type Movie,
@@ -59,19 +60,25 @@ export function StatusBadge({
   );
 }
 
-/** Score + votes, with the source shown so a TMDB fallback isn't mistaken for an
- *  IMDb number. Unrated titles (e.g. unreleased) fall back to TMDB's popularity
- *  "buzz" so the column still says something on the Upcoming radar. */
+/** Every rating a movie has — IMDb and TMDB stacked, each with its source so a
+ *  mix across rows reads as intentional. Titles with no real rating (e.g.
+ *  unreleased) fall back to TMDB's popularity "buzz" so the column still says
+ *  something on the Upcoming radar. */
 export function RatingCell({ movie }: { movie: Movie }) {
-  const r = effectiveRating(movie);
-  if (r) {
+  const ratings = allRatings(movie);
+  if (ratings.length > 0) {
     return (
-      <span className="whitespace-nowrap" title={`${r.source} rating`}>
-        <span className="text-amber-400">★</span> {r.score.toFixed(1)}
-        {r.votes > 0 && <span className="ml-1 text-xs opacity-50">{fmtVotes(r.votes)}</span>}
-        <span className="ml-1 align-middle text-[10px] uppercase opacity-40">
-          {r.source === "IMDb" ? "IMDb" : "TMDb"}
-        </span>
+      <span className="inline-flex flex-col gap-0.5 whitespace-nowrap leading-tight align-middle">
+        {ratings.map((r) => {
+          const label = ratingSourceLabel(r.source);
+          return (
+            <span key={r.source} title={`${label} rating`}>
+              <span className="text-amber-400">★</span> {r.score.toFixed(1)}
+              {r.votes > 0 && <span className="ml-1 text-xs opacity-50">{fmtVotes(r.votes)}</span>}
+              <span className="ml-1 align-middle text-[10px] opacity-40">{label}</span>
+            </span>
+          );
+        })}
       </span>
     );
   }
