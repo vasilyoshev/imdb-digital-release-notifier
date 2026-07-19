@@ -97,7 +97,7 @@ function History() {
       {(log.data ?? []).map((entry) => {
         const { icon, text } = describeLog(entry);
         return (
-          <li key={entry.id} className="flex gap-3 py-3">
+          <li key={`${entry.id}-${entry.channel}`} className="flex gap-3 py-3">
             <span className="text-base leading-none" aria-hidden="true">
               {icon}
             </span>
