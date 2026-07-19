@@ -27,6 +27,7 @@ export interface UpcomingEvent {
 
 export interface LogEntry {
   id: number;
+  channel: "push" | "email";
   event: "announced" | "released" | "date_changed";
   medium: Medium;
   effectiveDate: string;

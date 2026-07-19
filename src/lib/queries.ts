@@ -416,6 +416,7 @@ export function useActiveMovies() {
 
 interface DeliveryRow {
   sent_at: string;
+  channel: "push" | "email";
   event: {
     id: number;
     event: string;
@@ -437,7 +438,7 @@ export function useNotificationLog() {
       const { data, error } = await supabase
         .from("notification_deliveries")
         .select(
-          "sent_at, event:movie_events(id, event, medium, effective_date, movie:movies(title))",
+          "sent_at, channel, event:movie_events(id, event, medium, effective_date, movie:movies(title))",
         )
         .order("sent_at", { ascending: false });
       if (error) throw error;
@@ -448,6 +449,7 @@ export function useNotificationLog() {
         )
         .map((r) => ({
           id: r.event.id,
+          channel: r.channel,
           event: r.event.event as LogEntry["event"],
           medium: r.event.medium as LogEntry["medium"],
           effectiveDate: r.event.effective_date,
