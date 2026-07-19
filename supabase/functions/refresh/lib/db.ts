@@ -109,22 +109,37 @@ export async function getKnownImdbIds(db: SupabaseClient): Promise<Set<string>> 
   return new Set(rows.map((r) => r.imdb_id));
 }
 
-/** tmdb ids + digital dates of the movies a user follows — the search "already
- * tracked" markers. */
+/** How a movie is tracked by a user — search shows a manual follow (toggleable)
+ * differently from an IMDb-watchlist membership (managed by the sync). */
+export interface TrackedMovie {
+  followed: boolean;
+  onWatchlist: boolean;
+  digitalDate: string | null;
+}
+
+/** tmdb ids of the movies a user tracks, tagged by list kind + digital date —
+ * the search "already tracked" markers. A movie can be on both lists. */
 export async function getUserTrackedMovies(
   db: SupabaseClient,
   userId: string,
-): Promise<Map<number, string | null>> {
+): Promise<Map<number, TrackedMovie>> {
   const { data, error } = await db.from("list_memberships")
-    .select("movie:movies!inner(tmdb_id, digital_date), lists!inner(user_id)")
+    .select("movie:movies!inner(tmdb_id, digital_date), lists!inner(user_id, kind)")
     .eq("on_list", true).eq("lists.user_id", userId);
   if (error) throw new Error(`db getUserTrackedMovies: ${error.message}`);
   const rows = (data ?? []) as unknown as {
     movie: { tmdb_id: number | null; digital_date: string | null } | null;
+    lists: { kind: string } | null;
   }[];
-  const map = new Map<number, string | null>();
+  const map = new Map<number, TrackedMovie>();
   for (const r of rows) {
-    if (r.movie?.tmdb_id != null) map.set(r.movie.tmdb_id, r.movie.digital_date);
+    const id = r.movie?.tmdb_id;
+    if (id == null) continue;
+    const entry = map.get(id) ??
+      { followed: false, onWatchlist: false, digitalDate: r.movie!.digital_date };
+    if (r.lists?.kind === "manual") entry.followed = true;
+    if (r.lists?.kind === "imdb_watchlist") entry.onWatchlist = true;
+    map.set(id, entry);
   }
   return map;
 }

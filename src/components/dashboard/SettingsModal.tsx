@@ -11,6 +11,7 @@ import {
 } from "../../lib/queries";
 import { pushConfigured, pushSupported } from "../../lib/push";
 import { parseImdbUserId, type Settings, type WatchlistConfig } from "../../lib/settings";
+import { ConnectWatchlist } from "./ConnectWatchlist";
 
 /**
  * Settings behind the navbar gear (SPEC §9/§10/§11): a global card (email,
@@ -280,6 +281,19 @@ function SettingsForm({
           </div>
         </section>
       ))}
+
+      {/* Connect an IMDb watchlist when none exists yet (opt-in setup). */}
+      {!lists.some((l) => l.kind === "imdb_watchlist") && (
+        <section className="card border border-base-300 bg-base-200/40">
+          <div className="card-body gap-2 p-4">
+            <h3 className="text-sm font-semibold">IMDb Watchlist</h3>
+            <p className="text-xs text-base-content/60">
+              Not connected yet — sync the movies you’ve saved on IMDb.
+            </p>
+            <ConnectWatchlist />
+          </div>
+        </section>
+      )}
 
       {error && (
         <div role="alert" className="alert alert-error">

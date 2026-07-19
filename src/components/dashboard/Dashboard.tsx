@@ -15,7 +15,7 @@ import {
   toggleSort,
 } from "../../lib/table-controls";
 import { useAuth } from "../../lib/auth-context";
-import { useLists, useListMovies, useRadar } from "../../lib/queries";
+import { useLists, useListMovies, useRadar, useRefreshNow } from "../../lib/queries";
 import { ConnectWatchlist } from "./ConnectWatchlist";
 import { FilterToolbar } from "./FilterToolbar";
 import { MovieDetailPanel } from "./MovieDetailPanel";
@@ -51,7 +51,11 @@ export function Dashboard({ region }: { region: string }) {
   const listMovies = useListMovies(typeof activeTab === "number" ? activeTab : undefined);
   const source = onRadar ? radar : listMovies;
   const movies = useMemo(() => source.data ?? [], [source.data]);
-  const activeListKind = (lists.data ?? []).find((l) => l.id === activeTab)?.kind;
+  const activeList = (lists.data ?? []).find((l) => l.id === activeTab);
+  const activeListKind = activeList?.kind;
+  const activeImdbUserId =
+    (activeList?.config as { imdb_user_id?: string } | undefined)?.imdb_user_id ?? null;
+  const refresh = useRefreshNow();
 
   // Controls persist per surface: radar keys on region×window, lists on id.
   const controlsKey = onRadar ? `radar:${region}:${radarWindow}` : `list:${activeTab}`;
@@ -95,18 +99,26 @@ export function Dashboard({ region }: { region: string }) {
             {l.name}
           </TabButton>
         ))}
-        {isAuth && !hasWatchlist && (
-          <TabButton active={onConnect} onClick={() => { setActiveTab("connect"); setFilter(null); }}>
-            + Watchlist
-          </TabButton>
-        )}
         {lists.isLoading && <span className="loading loading-dots loading-sm mx-3 self-center" />}
       </div>
 
+      {/* Watchlist is opt-in: no tab until connected — a promo prompts setup. */}
+      {isAuth && !hasWatchlist && !onConnect && (
+        <WatchlistPromo onConnect={() => { setActiveTab("connect"); setFilter(null); }} />
+      )}
+
       {onConnect ? (
-        <ConnectWatchlist />
+        <ConnectWatchlist reconnect={hasWatchlist} />
       ) : (
         <>
+      {activeListKind === "imdb_watchlist" && (
+        <WatchlistHeader
+          imdbUserId={activeImdbUserId}
+          onResync={() => refresh.mutate()}
+          resyncing={refresh.isPending}
+          onChange={() => { setActiveTab("connect"); setFilter(null); }}
+        />
+      )}
       {onRadar ? (
         /* Radar window toggle (SPEC §4): the product is dates, not statuses. */
         <div role="tablist" className="tabs tabs-boxed w-fit bg-base-100">
@@ -173,7 +185,6 @@ export function Dashboard({ region }: { region: string }) {
             <MovieList
               movies={rows}
               today={today}
-              region={onRadar ? region : "BG"}
               sort={controls.sort}
               onToggleSort={(key) => updateControls({ ...controls, sort: toggleSort(controls.sort, key) })}
               onSelect={setSelectedMovieId}
@@ -200,6 +211,75 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
     <button role="tab" className={`tab ${active ? "tab-active" : ""}`} onClick={onClick}>
       {children}
     </button>
+  );
+}
+
+/** Opt-in prompt shown until an IMDb watchlist is connected — replaces the old
+ * always-present "+ Watchlist" tab (2026-07-19 UX request). */
+function WatchlistPromo({ onConnect }: { onConnect: () => void }) {
+  return (
+    <div className="rounded-box border border-base-300 bg-gradient-to-r from-base-200 to-base-100 p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <span className="text-2xl" aria-hidden="true">📋</span>
+        <div className="flex-1">
+          <div className="font-medium">Track your IMDb watchlist</div>
+          <div className="text-sm text-base-content/60">
+            Sync the movies you’ve saved on IMDb and get a push the moment each one lands on digital.
+          </div>
+        </div>
+        <button className="btn btn-primary btn-sm" onClick={onConnect}>
+          Connect watchlist
+        </button>
+      </div>
+      <p className="mt-2 text-xs text-base-content/45">
+        You can also set this up any time from Settings (the gear, top-right).
+      </p>
+    </div>
+  );
+}
+
+/** The connected-watchlist header: labels the tab as IMDb, shows whose profile,
+ * and offers inline re-sync / change. */
+function WatchlistHeader({
+  imdbUserId,
+  onResync,
+  resyncing,
+  onChange,
+}: {
+  imdbUserId: string | null;
+  onResync: () => void;
+  resyncing: boolean;
+  onChange: () => void;
+}) {
+  const profileUrl = imdbUserId ? `https://www.imdb.com/user/${imdbUserId}/watchlist` : null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-box border border-base-300 bg-base-100 px-4 py-2.5">
+      <span className="badge badge-info badge-sm">IMDb Watchlist</span>
+      {imdbUserId ? (
+        <span className="text-sm text-base-content/70">
+          Tracking{" "}
+          <a
+            href={profileUrl!}
+            target="_blank"
+            rel="noreferrer"
+            className="link font-medium text-base-content"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {imdbUserId} ↗
+          </a>
+        </span>
+      ) : (
+        <span className="text-sm text-base-content/50">Synced from your IMDb watchlist</span>
+      )}
+      <span className="flex-1" />
+      <button className="btn btn-ghost btn-xs" onClick={onResync} disabled={resyncing}>
+        {resyncing && <span className="loading loading-spinner loading-xs" />}
+        ↻ Re-sync
+      </button>
+      <button className="btn btn-ghost btn-xs" onClick={onChange}>
+        Change…
+      </button>
+    </div>
   );
 }
 

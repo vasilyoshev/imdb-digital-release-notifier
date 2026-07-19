@@ -8,13 +8,15 @@ export interface SearchHit {
   year: number | null;
   posterPath: string | null;
   overview: string | null;
-  /** Already on one of the caller's lists — the dropdown shows its status. */
-  tracked: boolean;
+  /** On the caller's manual Followed list — toggleable in the dropdown. */
+  followed: boolean;
+  /** On the caller's IMDb watchlist — shown as a status, not a toggle. */
+  onWatchlist: boolean;
   digitalDate: string | null;
 }
 
-/** SPEC §11 — proxy TMDb search and annotate each hit with whether the caller
- * already tracks it (so the dropdown can show digital status / hide Follow). */
+/** SPEC §11 — proxy TMDb search and annotate each hit with how the caller tracks
+ * it (manual follow vs IMDb watchlist), so the dropdown shows the right control. */
 export async function runSearch(
   db: SupabaseClient,
   userId: string,
@@ -26,9 +28,13 @@ export async function runSearch(
     searchMovies(query, tmdbToken),
     getUserTrackedMovies(db, userId),
   ]);
-  return results.map((r) => ({
-    ...r,
-    tracked: tracked.has(r.tmdbId),
-    digitalDate: tracked.get(r.tmdbId) ?? null,
-  }));
+  return results.map((r) => {
+    const t = tracked.get(r.tmdbId);
+    return {
+      ...r,
+      followed: t?.followed ?? false,
+      onWatchlist: t?.onWatchlist ?? false,
+      digitalDate: t?.digitalDate ?? null,
+    };
+  });
 }
