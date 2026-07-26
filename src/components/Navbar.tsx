@@ -115,9 +115,7 @@ export function Navbar({
               >
                 <li className="menu-title truncate text-base-content/60">{user.email ?? "Signed in"}</li>
                 <li>
-                  <a href="stremio://release-notifier.yoshevbot.uk/manifest.json">
-                    🎬 Add to Stremio
-                  </a>
+                  <a href="/configure">🎬 Stremio addon</a>
                 </li>
                 <li>
                   <button onClick={() => void signOut()}>Sign out</button>

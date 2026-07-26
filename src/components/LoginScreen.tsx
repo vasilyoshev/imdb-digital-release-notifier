@@ -30,7 +30,9 @@ export function LoginScreen({ onBack }: { onBack?: () => void }) {
     setError(null);
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: window.location.origin },
+      // href, not origin: signing in from /configure (Stremio's Configure
+      // round-trip) must land back on /configure after the OAuth dance.
+      options: { redirectTo: window.location.href },
     });
     // Success navigates the browser to Google; only an init error returns here.
     if (error) setError(error.message);
