@@ -3,11 +3,11 @@ import { STATUS_ORDER } from "../lib/dashboard";
 import type { SortKey } from "../lib/table-controls";
 import { useLists, useSupportedRegions } from "../lib/queries";
 import {
-  type CatalogCfg,
-  catalogCfg,
+  type CatalogDef,
+  isRadarSource,
+  newCatalogId,
+  parseCatalogs,
   RADAR_CATALOGS,
-  setCatalogPatch,
-  type StremioConfig,
   useCreateStremioConfig,
   useRegenerateStremioToken,
   useStremioConfig,
@@ -36,11 +36,15 @@ const VOTE_PRESETS: { label: string; value: number | null }[] = [
 ];
 
 /**
- * The Stremio configure/install page (map #109, #113) — the target of
+ * The Stremio configure/install page (map #109, #113 + #116) — the target of
  * /configure and of Stremio's Configure button (/{token}/configure; the token
- * in the URL is ignored, edits are RLS-scoped to the signed-in user). Install
- * links + one card per catalog; every change saves immediately and reaches an
- * installed addon within ~5 minutes (the Worker's cache window).
+ * in the URL is ignored, edits are RLS-scoped to the signed-in user).
+ *
+ * The user manages an ORDERED LIST of custom catalogs — "Add catalog" appends
+ * one; each card picks a source (a list or a radar window) and its own name,
+ * sort, and filters. Two catalogs may share a source with different filters.
+ * Every change saves the whole array immediately and reaches an installed
+ * addon within ~5 minutes (the Worker's cache window).
  */
 export function ConfigurePage() {
   const cfgQuery = useStremioConfig();
@@ -58,9 +62,33 @@ export function ConfigurePage() {
   }, [cfgQuery.isSuccess, cfgQuery.data, create]);
 
   const row = cfgQuery.data;
-  const config: StremioConfig = row?.config ?? {};
-  const patch = (catalogId: string, p: Record<string, unknown>) =>
-    update.mutate(setCatalogPatch(config, catalogId, p));
+  // The resolved catalog array — stored config when present, defaults otherwise
+  // (same resolution the Worker applies, so the page shows exactly what the
+  // addon serves). The first edit materializes the defaults into the config.
+  const catalogs =
+    row && lists.data ? parseCatalogs(row.config, lists.data) : [];
+
+  const save = (next: CatalogDef[]) =>
+    update.mutate({ ...(row?.config ?? {}), catalogs: next });
+  const patchAt = (i: number, patch: Partial<CatalogDef>) =>
+    save(catalogs.map((c, j) => (j === i ? { ...c, ...patch } : c)));
+  const removeAt = (i: number) => save(catalogs.filter((_, j) => j !== i));
+  const addCatalog = () => {
+    const firstList = lists.data?.[0];
+    save([
+      ...catalogs,
+      {
+        id: newCatalogId(),
+        name: "New catalog",
+        source: firstList ? `list-${firstList.id}` : RADAR_CATALOGS[0].id,
+        enabled: true,
+        sort: { key: "digital", dir: "desc" },
+        minVotes: null,
+        status: null,
+        region: "US",
+      },
+    ]);
+  };
 
   const manifestUrl = row ? `${window.location.origin}/${row.token}/manifest.json` : null;
   const deepLink = row ? `stremio://${window.location.host}/${row.token}/manifest.json` : null;
@@ -74,6 +102,14 @@ export function ConfigurePage() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
+
+  const sourceOptions = [
+    ...(lists.data ?? []).map((l) => ({
+      value: `list-${l.id}`,
+      label: l.kind === "imdb_watchlist" ? `${l.name} (IMDb watchlist)` : `${l.name} (list)`,
+    })),
+    ...RADAR_CATALOGS.map((c) => ({ value: c.id, label: `${c.name} (radar)` })),
+  ];
 
   const loading = cfgQuery.isLoading || lists.isLoading || !row;
 
@@ -149,83 +185,28 @@ export function ConfigurePage() {
                   Catalogs
                 </h2>
                 <p className="mt-1 text-xs text-base-content/50">
-                  Option changes (sort, filters, region) reach an installed addon within ~5
-                  minutes — no reinstall. Turning a catalog on or off changes the addon
-                  itself; Stremio usually picks that up when it next starts. If it
-                  doesn&apos;t, reinstall from the link above.
+                  Each catalog is its own row in Stremio: pick a source, then filter and sort
+                  it any way — the same source can appear in several catalogs with different
+                  filters. Option edits reach an installed addon within ~5 minutes; adding,
+                  removing, or toggling catalogs changes the addon itself — Stremio usually
+                  picks that up when it next starts, reinstall from the link above if not.
                 </p>
               </div>
 
-              {(lists.data ?? []).map((l) => {
-                const id = `list-${l.id}`;
-                const cfg = catalogCfg(config, id);
-                return (
-                  <CatalogCard
-                    key={id}
-                    title={l.name}
-                    badge={l.kind === "imdb_watchlist" ? "IMDb watchlist" : "manual list"}
-                    cfg={cfg}
-                    onToggle={(enabled) => patch(id, { enabled })}
-                  >
-                    <LabeledSelect
-                      label="Sort"
-                      value={cfg.sort.key}
-                      onChange={(key) => patch(id, { sort: { ...cfg.sort, key } })}
-                      options={SORT_KEYS.map((k) => ({ value: k, label: SORT_LABELS[k] }))}
-                    />
-                    <LabeledSelect
-                      label="Direction"
-                      value={cfg.sort.dir}
-                      onChange={(dir) => patch(id, { sort: { ...cfg.sort, dir } })}
-                      options={[
-                        { value: "desc", label: "Descending ↓" },
-                        { value: "asc", label: "Ascending ↑" },
-                      ]}
-                    />
-                    <LabeledSelect
-                      label="Popularity"
-                      value={String(cfg.minVotes ?? "")}
-                      onChange={(v) => patch(id, { minVotes: v ? Number(v) : null })}
-                      options={VOTE_PRESETS.map((p) => ({
-                        value: String(p.value ?? ""),
-                        label: p.label,
-                      }))}
-                    />
-                    <LabeledSelect
-                      label="Status"
-                      value={cfg.status ?? ""}
-                      onChange={(v) => patch(id, { status: v || null })}
-                      options={[
-                        { value: "", label: "All statuses" },
-                        ...STATUS_ORDER.map((s) => ({ value: s, label: s })),
-                      ]}
-                    />
-                  </CatalogCard>
-                );
-              })}
+              {catalogs.map((c, i) => (
+                <CatalogCard
+                  key={c.id}
+                  def={c}
+                  sourceOptions={sourceOptions}
+                  regions={regions.data ?? []}
+                  onPatch={(patch) => patchAt(i, patch)}
+                  onRemove={() => removeAt(i)}
+                />
+              ))}
 
-              {RADAR_CATALOGS.map((r) => {
-                const cfg = catalogCfg(config, r.id);
-                return (
-                  <CatalogCard
-                    key={r.id}
-                    title={r.name}
-                    badge="radar"
-                    cfg={cfg}
-                    onToggle={(enabled) => patch(r.id, { enabled })}
-                  >
-                    <LabeledSelect
-                      label="Region"
-                      value={cfg.region}
-                      onChange={(region) => patch(r.id, { region })}
-                      options={(regions.data ?? []).map((x) => ({
-                        value: x.region,
-                        label: `${x.region} — ${x.name}`,
-                      }))}
-                    />
-                  </CatalogCard>
-                );
-              })}
+              <button className="btn btn-outline btn-sm self-start" onClick={addCatalog}>
+                + Add catalog
+              </button>
             </section>
 
             {update.isError && (
@@ -284,49 +265,142 @@ export function ConfigurePage() {
 }
 
 function CatalogCard({
-  title,
-  badge,
-  cfg,
-  onToggle,
-  children,
+  def,
+  sourceOptions,
+  regions,
+  onPatch,
+  onRemove,
 }: {
-  title: string;
-  badge: string;
-  cfg: CatalogCfg;
-  onToggle: (enabled: boolean) => void;
-  children: React.ReactNode;
+  def: CatalogDef;
+  sourceOptions: { value: string; label: string }[];
+  regions: { region: string; name: string }[];
+  onPatch: (patch: Partial<CatalogDef>) => void;
+  onRemove: () => void;
 }) {
+  // Local draft for the name so typing doesn't fire a save per keystroke —
+  // committed on blur/Enter.
+  const [name, setName] = useState(def.name);
+  useEffect(() => setName(def.name), [def.name]);
+  const commitName = () => {
+    const trimmed = name.trim();
+    if (trimmed && trimmed !== def.name) onPatch({ name: trimmed });
+    else setName(def.name);
+  };
+
+  const radar = isRadarSource(def.source);
+
   return (
     <div className="card border border-base-300 bg-base-100">
       <div className="card-body gap-3 p-4">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate font-medium">{title}</span>
-            <span className="badge badge-ghost badge-sm shrink-0">{badge}</span>
-          </div>
+        <div className="flex flex-wrap items-center gap-2">
           <input
-            type="checkbox"
-            className="toggle toggle-primary"
-            checked={cfg.enabled}
-            onChange={(e) => onToggle(e.target.checked)}
-            aria-label={`Show ${title} in Stremio`}
+            className="input input-sm input-bordered w-40 grow font-medium sm:w-52 sm:grow-0"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={commitName}
+            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+            aria-label="Catalog name"
           />
+          <select
+            className="select select-sm select-bordered w-auto"
+            value={def.source}
+            onChange={(e) => onPatch({ source: e.target.value })}
+            aria-label="Catalog source"
+          >
+            {sourceOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          <div className="ml-auto flex items-center gap-2">
+            <input
+              type="checkbox"
+              className="toggle toggle-primary"
+              checked={def.enabled}
+              onChange={(e) => onPatch({ enabled: e.target.checked })}
+              aria-label={`Show ${def.name} in Stremio`}
+            />
+            <button
+              className="btn btn-ghost btn-sm btn-circle text-error"
+              onClick={onRemove}
+              aria-label={`Remove ${def.name}`}
+              title="Remove catalog"
+            >
+              ✕
+            </button>
+          </div>
         </div>
-        {cfg.enabled && <div className="flex flex-wrap gap-3">{children}</div>}
+
+        {def.enabled && (
+          <div className="flex flex-wrap gap-3">
+            {radar ? (
+              <LabeledSelect
+                label="Region"
+                value={def.region}
+                onChange={(region) => onPatch({ region })}
+                options={regions.map((x) => ({
+                  value: x.region,
+                  label: `${x.region} — ${x.name}`,
+                }))}
+              />
+            ) : (
+              <>
+                <LabeledSelect
+                  label="Sort"
+                  value={def.sort.key}
+                  onChange={(key) => onPatch({ sort: { ...def.sort, key: key as SortKey } })}
+                  options={SORT_KEYS.map((k) => ({ value: k, label: SORT_LABELS[k] }))}
+                />
+                <LabeledSelect
+                  label="Direction"
+                  value={def.sort.dir}
+                  onChange={(dir) =>
+                    onPatch({ sort: { ...def.sort, dir: dir as "asc" | "desc" } })
+                  }
+                  options={[
+                    { value: "desc", label: "Descending ↓" },
+                    { value: "asc", label: "Ascending ↑" },
+                  ]}
+                />
+                <LabeledSelect
+                  label="Popularity"
+                  value={String(def.minVotes ?? "")}
+                  onChange={(v) => onPatch({ minVotes: v ? Number(v) : null })}
+                  options={VOTE_PRESETS.map((p) => ({
+                    value: String(p.value ?? ""),
+                    label: p.label,
+                  }))}
+                />
+                <LabeledSelect
+                  label="Status"
+                  value={def.status ?? ""}
+                  onChange={(v) =>
+                    onPatch({ status: (v || null) as CatalogDef["status"] })
+                  }
+                  options={[
+                    { value: "", label: "All statuses" },
+                    ...STATUS_ORDER.map((s) => ({ value: s, label: s })),
+                  ]}
+                />
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function LabeledSelect<T extends string>({
+function LabeledSelect({
   label,
   value,
   onChange,
   options,
 }: {
   label: string;
-  value: T;
-  onChange: (v: T) => void;
+  value: string;
+  onChange: (v: string) => void;
   options: { value: string; label: string }[];
 }) {
   return (
@@ -335,7 +409,7 @@ function LabeledSelect<T extends string>({
       <select
         className="select select-sm select-bordered w-auto"
         value={value}
-        onChange={(e) => onChange(e.target.value as T)}
+        onChange={(e) => onChange(e.target.value)}
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>

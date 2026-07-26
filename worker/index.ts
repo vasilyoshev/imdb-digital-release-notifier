@@ -15,7 +15,8 @@ import { buildManifest, fetchCatalog, parseExtras, windowForCatalog } from "./st
 import {
   buildListMetas,
   buildPersonalManifest,
-  catalogCfg,
+  listIdOfSource,
+  parseCatalogs,
   type ListRow,
   type TokenData,
 } from "./personal";
@@ -134,27 +135,26 @@ export default {
             p_token: token,
           });
           if (!data) return json({ metas: [] }, CACHE_PERSONAL);
-          const cfg = catalogCfg(data.config, catalogId);
+          // Catalog ids are the user-defined entries' ids (#116).
+          const def = parseCatalogs(data.config, data.lists).find((d) => d.id === catalogId);
+          if (!def || !def.enabled) return json({ metas: [] }, CACHE_PERSONAL);
 
-          if (catalogId.startsWith("list-")) {
-            const listId = Number(catalogId.slice(5));
-            if (!cfg.enabled || !data.lists.some((l) => l.id === listId)) {
-              return json({ metas: [] }, CACHE_PERSONAL);
-            }
+          const listId = listIdOfSource(def.source);
+          if (listId != null) {
             const rows = await rpc<ListRow[]>(env, "stremio_list_movies", {
               p_token: token,
               p_list_id: listId,
             });
-            return json({ metas: buildListMetas(rows, cfg, skip) }, CACHE_PERSONAL);
+            return json({ metas: buildListMetas(rows, def, skip) }, CACHE_PERSONAL);
           }
 
-          const window = windowForCatalog(catalogId);
-          if (!window || !cfg.enabled) return json({ metas: [] }, CACHE_PERSONAL);
+          const window = windowForCatalog(def.source);
+          if (!window) return json({ metas: [] }, CACHE_PERSONAL);
           // The in-Stremio region dropdown wins when used; otherwise the
           // configured region (parseExtras alone can't tell "US picked" from
           // "no genre given" — both come back as US).
           const hasGenre = extraRaw != null && /(^|&)genre=/.test(decodeURIComponent(extraRaw));
-          const region = hasGenre ? extraRegion : cfg.region;
+          const region = hasGenre ? extraRegion : def.region;
           const metas = await fetchCatalog(
             env.VITE_SUPABASE_URL,
             env.VITE_SUPABASE_ANON_KEY,

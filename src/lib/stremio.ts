@@ -9,7 +9,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "./supabase";
 import type { TokenData } from "../../worker/personal";
 
-export { catalogCfg, type CatalogCfg } from "../../worker/personal";
+export {
+  type CatalogDef,
+  defaultCatalogs,
+  isRadarSource,
+  listIdOfSource,
+  parseCatalogs,
+} from "../../worker/personal";
 export { CATALOGS as RADAR_CATALOGS } from "../../worker/stremio-core";
 
 export type StremioConfig = TokenData["config"];
@@ -19,16 +25,10 @@ export interface StremioConfigRow {
   config: StremioConfig;
 }
 
-/** Merge one catalog's stored entry with a patch, immutably. Only the touched
- * keys are stored — anything absent stays "default" (the #111 contract). */
-export function setCatalogPatch(
-  config: StremioConfig,
-  catalogId: string,
-  patch: Record<string, unknown>,
-): StremioConfig {
-  const catalogs = (config.catalogs ?? {}) as Record<string, unknown>;
-  const current = (catalogs[catalogId] ?? {}) as Record<string, unknown>;
-  return { ...config, catalogs: { ...catalogs, [catalogId]: { ...current, ...patch } } };
+/** A fresh user-added catalog id — short, unique enough per user, and never
+ * colliding with the default `list-*`/`*-digital` ids. */
+export function newCatalogId(): string {
+  return `c-${crypto.randomUUID().slice(0, 8)}`;
 }
 
 /** The caller's addon row — null until first provisioned (RLS-scoped). */
