@@ -14,7 +14,16 @@ compatibility_date = "2026-07-01"
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
-run_worker_first = ["/manifest.json", "/catalog/movie/*"]
+# The last two route the token'd personal addon (map #109) through the Worker;
+# `*` matches across segments, and non-addon over-matches (e.g. any other
+# /{something}/manifest.json) just fall through to ASSETS inside the Worker.
+# /{token}/configure is deliberately NOT here — that's an SPA route.
+run_worker_first = [
+  "/manifest.json",
+  "/catalog/movie/*",
+  "/*/manifest.json",
+  "/*/catalog/movie/*",
+]
 
 # Anon PostgREST surface for the Stremio addon (same public values the SPA build
 # already embeds — no service role, no secrets).

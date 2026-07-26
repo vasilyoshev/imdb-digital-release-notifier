@@ -15,7 +15,7 @@ export const APP_URL = "https://release-notifier.yoshevbot.uk";
 export const REGIONS = ["US", "BG", "GB", "DE"];
 export const PAGE_SIZE = 100;
 
-const CATALOGS = [
+export const CATALOGS = [
   { id: "new-digital", name: "New on digital", window: "recent" as const },
   { id: "upcoming-digital", name: "Upcoming digital", window: "upcoming" as const },
 ];
@@ -33,7 +33,7 @@ export function buildManifest() {
   ];
   return {
     id: ADDON_ID,
-    version: "1.0.0",
+    version: "1.1.0",
     name: "Digital Release Radar",
     description:
       `Recently-released and upcoming digital movie releases, region by region. ` +
@@ -42,7 +42,9 @@ export function buildManifest() {
     types: ["movie"],
     idPrefixes: ["tt"],
     catalogs: CATALOGS.map((c) => ({ type: "movie", id: c.id, name: c.name, extra })),
-    behaviorHints: { configurable: false, configurationRequired: false },
+    // configurable funnels the Configure button to /configure (map #109);
+    // the anon catalogs themselves stay exactly as they were.
+    behaviorHints: { configurable: true, configurationRequired: false },
   };
 }
 
