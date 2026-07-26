@@ -36,8 +36,11 @@ const CORS: Record<string, string> = {
 };
 // Stremio addons are heavily cached at the edge; the anon radar changes hourly
 // at most, but token'd catalogs must pick up /configure edits within ~5 min.
+// No stale-while-revalidate on the token'd routes: SWR let caches serve up to an
+// hour-old config after the 5 min lapsed (observed in #114), and Stremio adds its
+// own caching on top — so staleness here stays hard-bounded at max-age.
 const CACHE_ANON = "public, max-age=3600, stale-while-revalidate=86400";
-const CACHE_PERSONAL = "public, max-age=300, stale-while-revalidate=3600";
+const CACHE_PERSONAL = "public, max-age=300";
 
 function json(
   body: unknown,

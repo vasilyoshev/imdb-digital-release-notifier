@@ -158,7 +158,7 @@ export function ConfigurePage() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <a className="btn btn-primary btn-sm" href={deepLink ?? "#"}>
-                    Install in Stremio
+                    Install / reinstall in Stremio
                   </a>
                   <a
                     className="btn btn-outline btn-sm"
@@ -166,7 +166,7 @@ export function ConfigurePage() {
                     target="_blank"
                     rel="noreferrer"
                   >
-                    Install via Stremio Web
+                    Open in Stremio Web
                   </a>
                   <button
                     className="btn btn-ghost btn-sm text-error"
@@ -175,6 +175,11 @@ export function ConfigurePage() {
                     Regenerate link…
                   </button>
                 </div>
+                <p className="text-xs text-base-content/50">
+                  Already installed? Use the same button to reinstall — that&apos;s how
+                  Stremio picks up catalogs you&apos;ve added, removed, or renamed. In
+                  Stremio Web you may need to Uninstall first.
+                </p>
               </div>
             </section>
 
@@ -187,9 +192,19 @@ export function ConfigurePage() {
                 <p className="mt-1 text-xs text-base-content/50">
                   Each catalog is its own row in Stremio: pick a source, then filter and sort
                   it any way — the same source can appear in several catalogs with different
-                  filters. Option edits reach an installed addon within ~5 minutes; adding,
-                  removing, or toggling catalogs changes the addon itself — Stremio usually
-                  picks that up when it next starts, reinstall from the link above if not.
+                  filters.
+                </p>
+                <p className="mt-2 text-xs text-base-content/50">
+                  <span className="font-medium text-base-content/70">Filter and sort edits</span>{" "}
+                  apply to an installed addon on their own, though Stremio caches catalog rows
+                  and can take a while to show them.{" "}
+                  <span className="font-medium text-base-content/70">
+                    Adding, removing, renaming, or toggling a catalog
+                  </span>{" "}
+                  changes the addon itself — Stremio keeps the catalog list it saw at install
+                  time, so <span className="font-medium text-base-content/70">reinstall</span>{" "}
+                  (button above) to apply those. Reinstalling also refreshes everything else
+                  immediately.
                 </p>
               </div>
 
@@ -231,7 +246,7 @@ export function ConfigurePage() {
             <p className="py-2 text-sm text-base-content/70">
               Stremio identifies addons by their URL, so your current install becomes a dead
               copy — it will show empty catalogs until you remove it. After regenerating:
-              remove the old addon in Stremio, then install again with the new link.
+              uninstall the old addon in Stremio, then install again with the new link.
             </p>
             {regen.isError && (
               <div role="alert" className="alert alert-error py-2 text-sm">
