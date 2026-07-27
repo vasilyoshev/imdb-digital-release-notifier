@@ -40,7 +40,8 @@ export function anonManifestBase() {
       `Recently-released and upcoming digital movie releases, region by region. ` +
       `Pick your regions, then sort and filter the rows however you like — ` +
       `no account needed. Powered by ${APP_URL}`,
-    logo: `${APP_URL}/icons/icon-512.png`,
+    // 256×256 PNG is what the manifest spec asks a listed addon for.
+    logo: `${APP_URL}/icons/icon-256.png`,
     contactEmail: CONTACT_EMAIL,
     resources: ["catalog"],
     types: ["movie"],

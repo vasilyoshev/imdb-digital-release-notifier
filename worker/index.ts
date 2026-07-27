@@ -52,7 +52,13 @@ function json(
   extra: Record<string, string> = {},
 ): Response {
   return new Response(JSON.stringify(body), {
-    headers: { "content-type": "application/json", ...CORS, "cache-control": cache, ...extra },
+    headers: {
+      // charset matches what the official SDK serves; some clients are picky.
+      "content-type": "application/json; charset=utf-8",
+      ...CORS,
+      "cache-control": cache,
+      ...extra,
+    },
   });
 }
 
