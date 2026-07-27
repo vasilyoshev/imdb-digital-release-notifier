@@ -10,16 +10,22 @@ import { LoginScreen } from "./components/LoginScreen";
  * a view you opt into. On sign-in the auth listener swaps in the signed-in
  * Console automatically.
  *
- * One real route besides the shell: /configure and /{token}/configure — the
- * Stremio addon configure page (map #109). The token'd form is what Stremio's
- * Configure button opens; the token in the URL is ignored (edits are RLS-scoped
- * to the signed-in user), it only makes the URL round-trip.
+ * One real route besides the shell: the Stremio addon configure page (map
+ * #109), reachable as /configure, /{token}/configure and /c/{config}/configure.
+ * The prefixed forms are what Stremio's Configure button opens — a token is
+ * ignored there (edits are RLS-scoped to the signed-in user) and only makes the
+ * URL round-trip, while an anonymous config is decoded to prefill the page.
+ * Signed out, the page still works: radar-only catalogs encoded into the
+ * install link, no account required (#118).
  */
 export default function App() {
   const { session, loading } = useAuth();
   const [showLogin, setShowLogin] = useState(false);
   const path = window.location.pathname;
-  const isConfigure = path === "/configure" || /^\/[0-9a-f]{48}\/configure$/.test(path);
+  const isConfigure =
+    path === "/configure" ||
+    /^\/[0-9a-f]{48}\/configure$/.test(path) ||
+    /^\/c\/[^/]+\/configure$/.test(path);
 
   if (loading) {
     return (
@@ -30,7 +36,8 @@ export default function App() {
   }
 
   if (isConfigure) {
-    if (!session) return <LoginScreen onBack={() => window.location.assign("/")} />;
+    if (!session && showLogin) return <LoginScreen onBack={() => setShowLogin(false)} />;
+    if (!session) return <ConfigurePage anonymous onSignIn={() => setShowLogin(true)} />;
     return <ConfigurePage />;
   }
 

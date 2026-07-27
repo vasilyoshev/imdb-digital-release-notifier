@@ -8,10 +8,13 @@
  */
 import { assertEquals } from "jsr:@std/assert";
 import {
+  buildAnonManifest,
   buildListMetas,
   buildPersonalManifest,
   type CatalogDef,
+  decodeCatalogs,
   defaultCatalogs,
+  encodeCatalogs,
   isRadarSource,
   listIdOfSource,
   type ListRow,
@@ -192,6 +195,63 @@ Deno.test("a dead token yields an empty-catalog manifest, never a broken install
   assertEquals(manifest.description.includes("/configure"), true);
 });
 
+// ---- anonymous URL-carried config (#118) ----------------------------------
+
+Deno.test("an anonymous config survives an encode/decode round trip", () => {
+  const defs = parseCatalogs(
+    {
+      catalogs: [
+        { id: "a", name: "Bulgaria soon", source: "upcoming-digital", region: "BG", minVotes: 1000 },
+        { id: "b", source: "new-digital", sort: { key: "rating", dir: "asc" }, status: "Out now" },
+      ],
+    },
+    [],
+  );
+  assertEquals(decodeCatalogs(encodeCatalogs(defs)), defs);
+});
+
+Deno.test("the encoding omits defaults, so a plain config stays short", () => {
+  const encoded = encodeCatalogs(defaultCatalogs([]));
+  assertEquals(encoded.length < 160, true, `encoded length was ${encoded.length}`);
+  assertEquals(decodeCatalogs(encoded), defaultCatalogs([]));
+});
+
+Deno.test("base64url encoding can never contain the Configure-button substring", () => {
+  // Stremio derives the configure URL by replacing "manifest.json" in the
+  // transport URL (#110) — a config containing it would corrupt the round trip.
+  const encoded = encodeCatalogs(
+    parseCatalogs({ catalogs: [{ id: "x", name: "manifest.json ☠", source: "new-digital" }] }, []),
+  );
+  assertEquals(encoded.includes("manifest.json"), false);
+  assertEquals(encoded.includes("."), false);
+  // …and non-ASCII names survive the round trip.
+  assertEquals(decodeCatalogs(encoded)[0].name, "manifest.json ☠");
+});
+
+Deno.test("a list-backed source can never ride in an anonymous config", () => {
+  // Private lists must not become URL-addressable: decoding resolves against an
+  // empty list set, so list sources are dropped even if hand-crafted into a link.
+  const forged = encodeCatalogs([
+    { id: "sneaky", name: "Someone's watchlist", source: "list-1", enabled: true, sort: { key: "digital", dir: "desc" }, minVotes: null, status: null, region: "US" },
+  ]);
+  assertEquals(decodeCatalogs(forged), []);
+});
+
+Deno.test("a corrupt config link still installs the plain radar rather than erroring", () => {
+  assertEquals(decodeCatalogs("not-valid-base64!!!"), defaultCatalogs([]));
+  assertEquals(decodeCatalogs(""), defaultCatalogs([]));
+  assertEquals(decodeCatalogs(btoa('{"not":"an array"}')), defaultCatalogs([]));
+});
+
+Deno.test("the anonymous manifest carries the listing metadata and the public addon id", () => {
+  const m = buildAnonManifest(defaultCatalogs([]));
+  assertEquals(m.id, "uk.yoshevbot.release-notifier.radar");
+  assertEquals(typeof m.logo, "string");
+  assertEquals(typeof m.contactEmail, "string");
+  assertEquals(m.behaviorHints.configurable, true);
+  assertEquals(m.catalogs.map((c) => c.id), ["new-digital", "upcoming-digital"]);
+});
+
 // ---- catalog rows ---------------------------------------------------------
 
 const ROWS: ListRow[] = [
@@ -230,6 +290,37 @@ Deno.test("sort direction flips the order", () => {
   const desc = buildListMetas(ROWS, def({ sort: { key: "digital", dir: "desc" } }), 0, TODAY);
   const asc = buildListMetas(ROWS, def({ sort: { key: "digital", dir: "asc" } }), 0, TODAY);
   assertEquals(desc.map((m) => m.id), [...asc.map((m) => m.id)].reverse());
+});
+
+Deno.test("radar catalogs keep the curated rank order but still honour the vote floor", () => {
+  // "rank" means: the pipeline already ordered these, don't second-guess it.
+  const ranked = [
+    row({ imdb_id: "tt-c", title: "Ranked first", digital_date: "2020-01-01", imdb_votes: 5_000, imdb_rating: 5 }),
+    row({ imdb_id: "tt-a", title: "Ranked second", digital_date: "2030-01-01", imdb_votes: 200, imdb_rating: 9 }),
+    row({ imdb_id: "tt-b", title: "Ranked third", digital_date: "2025-01-01", imdb_votes: 90_000, imdb_rating: 1 }),
+  ];
+  const asIs = buildListMetas(ranked, def({ source: "new-digital", sort: { key: "rank", dir: "desc" } }), 0, TODAY);
+  assertEquals(asIs.map((m) => m.id), ["tt-c", "tt-a", "tt-b"]);
+
+  const floored = buildListMetas(
+    ranked,
+    def({ source: "new-digital", sort: { key: "rank", dir: "desc" }, minVotes: 1000 }),
+    0,
+    TODAY,
+  );
+  assertEquals(floored.map((m) => m.id), ["tt-c", "tt-b"]);
+});
+
+Deno.test("radar catalogs default to rank, list catalogs to newest digital", () => {
+  const [list, , radar] = defaultCatalogs(LISTS);
+  assertEquals(list.sort.key, "digital");
+  assertEquals(radar.sort.key, "rank");
+  // "rank" is radar-only — a list catalog asking for it falls back.
+  const [forged] = parseCatalogs(
+    { catalogs: [{ id: "x", source: "list-1", sort: { key: "rank", dir: "desc" } }] },
+    LISTS,
+  );
+  assertEquals(forged.sort.key, "digital");
 });
 
 Deno.test("skip paginates within the sorted result", () => {

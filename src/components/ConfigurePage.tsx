@@ -4,6 +4,10 @@ import type { SortKey } from "../lib/table-controls";
 import { useLists, useSupportedRegions } from "../lib/queries";
 import {
   type CatalogDef,
+  type CatalogSortKey,
+  decodeCatalogs,
+  defaultCatalogs,
+  encodeCatalogs,
   isRadarSource,
   newCatalogId,
   parseCatalogs,
@@ -16,7 +20,8 @@ import {
 import { Mark } from "./Mark";
 import { AttributionLine } from "./Footer";
 
-const SORT_LABELS: Record<SortKey, string> = {
+const SORT_LABELS: Record<CatalogSortKey, string> = {
+  rank: "Curated rank",
   digital: "Digital date",
   theatrical: "Theatrical date",
   added: "Date added",
@@ -26,7 +31,11 @@ const SORT_LABELS: Record<SortKey, string> = {
   title: "Title",
   status: "Status",
 };
-const SORT_KEYS = Object.keys(SORT_LABELS) as SortKey[];
+const LIST_SORT_KEYS = (Object.keys(SORT_LABELS) as CatalogSortKey[]).filter(
+  (k): k is SortKey => k !== "rank",
+);
+// Radar rows arrive curated, so "rank" leads and is the default there.
+const RADAR_SORT_KEYS: CatalogSortKey[] = ["rank", ...LIST_SORT_KEYS];
 
 const VOTE_PRESETS: { label: string; value: number | null }[] = [
   { label: "Any popularity", value: null },
@@ -35,54 +44,75 @@ const VOTE_PRESETS: { label: string; value: number | null }[] = [
   { label: "100k+ votes", value: 100000 },
 ];
 
+/** An anonymous visitor's starting point, or whatever their link already
+ * encodes — radar catalogs only, since lists need an account (#118). */
+function seedAnonCatalogs(): CatalogDef[] {
+  const match = /^\/c\/([^/]+)\/configure\/?$/.exec(window.location.pathname);
+  return match ? decodeCatalogs(match[1]) : defaultCatalogs([]);
+}
+
 /**
- * The Stremio configure/install page (map #109, #113 + #116) — the target of
- * /configure and of Stremio's Configure button (/{token}/configure; the token
- * in the URL is ignored, edits are RLS-scoped to the signed-in user).
+ * The Stremio configure/install page (map #109) — the target of /configure and
+ * of Stremio's Configure button (/{token}/configure, /c/{config}/configure).
  *
- * The user manages an ORDERED LIST of custom catalogs — "Add catalog" appends
- * one; each card picks a source (a list or a radar window) and its own name,
- * sort, and filters. Two catalogs may share a source with different filters.
- * Every change saves the whole array immediately and reaches an installed
- * addon within ~5 minutes (the Worker's cache window).
+ * Two modes. **Signed in**: catalogs may draw on the user's lists, live in the
+ * DB, and install under a personal token, so edits reach an installed addon
+ * without a new link. **Anonymous** (#118): radar catalogs only, held in
+ * component state and encoded into the install URL itself — no account, no
+ * token, nothing stored, so each edit produces a new link to install.
  */
-export function ConfigurePage() {
-  const cfgQuery = useStremioConfig();
-  const lists = useLists();
+export function ConfigurePage({
+  anonymous = false,
+  onSignIn,
+}: {
+  anonymous?: boolean;
+  onSignIn?: () => void;
+}) {
+  const cfgQuery = useStremioConfig(!anonymous);
+  const lists = useLists(!anonymous);
   const regions = useSupportedRegions();
   const create = useCreateStremioConfig();
   const update = useUpdateStremioConfig();
   const regen = useRegenerateStremioToken();
+  const [anonCatalogs, setAnonCatalogs] = useState<CatalogDef[]>(seedAnonCatalogs);
   const [confirmRegen, setConfirmRegen] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  // Lazy provisioning: the first visit creates the row (and its token).
+  // Lazy provisioning: a signed-in user's first visit creates their row (and
+  // its token). Anonymous visitors never get one.
   useEffect(() => {
-    if (cfgQuery.isSuccess && cfgQuery.data === null && create.isIdle) create.mutate();
-  }, [cfgQuery.isSuccess, cfgQuery.data, create]);
+    if (!anonymous && cfgQuery.isSuccess && cfgQuery.data === null && create.isIdle) {
+      create.mutate();
+    }
+  }, [anonymous, cfgQuery.isSuccess, cfgQuery.data, create]);
 
   const row = cfgQuery.data;
-  // The resolved catalog array — stored config when present, defaults otherwise
-  // (same resolution the Worker applies, so the page shows exactly what the
-  // addon serves). The first edit materializes the defaults into the config.
-  const catalogs =
-    row && lists.data ? parseCatalogs(row.config, lists.data) : [];
+  // The resolved catalog array — the same resolution the Worker applies, so the
+  // page always shows exactly what the addon will serve.
+  const catalogs = anonymous
+    ? anonCatalogs
+    : row && lists.data
+      ? parseCatalogs(row.config, lists.data)
+      : [];
 
-  const save = (next: CatalogDef[]) =>
-    update.mutate({ ...(row?.config ?? {}), catalogs: next });
+  const save = (next: CatalogDef[]) => {
+    if (anonymous) setAnonCatalogs(next);
+    else update.mutate({ ...(row?.config ?? {}), catalogs: next });
+  };
   const patchAt = (i: number, patch: Partial<CatalogDef>) =>
     save(catalogs.map((c, j) => (j === i ? { ...c, ...patch } : c)));
   const removeAt = (i: number) => save(catalogs.filter((_, j) => j !== i));
   const addCatalog = () => {
-    const firstList = lists.data?.[0];
+    const firstList = anonymous ? undefined : lists.data?.[0];
+    const source = firstList ? `list-${firstList.id}` : RADAR_CATALOGS[0].id;
     save([
       ...catalogs,
       {
         id: newCatalogId(),
         name: "New catalog",
-        source: firstList ? `list-${firstList.id}` : RADAR_CATALOGS[0].id,
+        source,
         enabled: true,
-        sort: { key: "digital", dir: "desc" },
+        sort: { key: isRadarSource(source) ? "rank" : "digital", dir: "desc" },
         minVotes: null,
         status: null,
         region: "US",
@@ -90,8 +120,15 @@ export function ConfigurePage() {
     ]);
   };
 
-  const manifestUrl = row ? `${window.location.origin}/${row.token}/manifest.json` : null;
-  const deepLink = row ? `stremio://${window.location.host}/${row.token}/manifest.json` : null;
+  // Anonymous installs carry their whole config in the path; signed-in ones
+  // carry a token and read the config server-side.
+  const installPath = anonymous
+    ? `/c/${encodeCatalogs(catalogs)}/manifest.json`
+    : row
+      ? `/${row.token}/manifest.json`
+      : null;
+  const manifestUrl = installPath ? `${window.location.origin}${installPath}` : null;
+  const deepLink = installPath ? `stremio://${window.location.host}${installPath}` : null;
   const webInstall = manifestUrl
     ? `https://web.stremio.com/#/addons?addon=${encodeURIComponent(manifestUrl)}`
     : null;
@@ -104,14 +141,14 @@ export function ConfigurePage() {
   }
 
   const sourceOptions = [
-    ...(lists.data ?? []).map((l) => ({
+    ...(anonymous ? [] : lists.data ?? []).map((l) => ({
       value: `list-${l.id}`,
       label: l.kind === "imdb_watchlist" ? `${l.name} (IMDb watchlist)` : `${l.name} (list)`,
     })),
     ...RADAR_CATALOGS.map((c) => ({ value: c.id, label: `${c.name} (radar)` })),
   ];
 
-  const loading = cfgQuery.isLoading || lists.isLoading || !row;
+  const loading = anonymous ? false : cfgQuery.isLoading || lists.isLoading || !row;
 
   return (
     <div className="flex min-h-screen flex-col bg-base-200 text-base-content">
@@ -123,9 +160,15 @@ export function ConfigurePage() {
           </span>
           <span className="badge badge-ghost ml-1 font-mono text-xs">Stremio addon</span>
         </div>
-        <a href="/" className="btn btn-ghost btn-sm">
-          ← Back to Console
-        </a>
+        {anonymous ? (
+          <button className="btn btn-primary btn-sm" onClick={() => onSignIn?.()}>
+            Sign in
+          </button>
+        ) : (
+          <a href="/" className="btn btn-ghost btn-sm">
+            ← Back to Console
+          </a>
+        )}
       </header>
 
       <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-6">
@@ -140,9 +183,9 @@ export function ConfigurePage() {
               <div className="card-body gap-3 p-4 sm:p-6">
                 <h2 className="card-title text-base">🎬 Install in Stremio</h2>
                 <p className="text-sm text-base-content/60">
-                  Your personal addon link — it serves the catalogs below, filtered and sorted
-                  your way. Keep it to yourself: anyone with the link can see what&apos;s on
-                  your lists.
+                  {anonymous
+                    ? "Set the catalogs up below, then install — no account needed. Your choices live in the link itself, so change them any time and install the new link."
+                    : "Your personal addon link — it serves the catalogs below, filtered and sorted your way. Keep it to yourself: anyone with the link can see what's on your lists."}
                 </p>
                 <div className="join w-full">
                   <input
@@ -168,12 +211,14 @@ export function ConfigurePage() {
                   >
                     Open in Stremio Web
                   </a>
-                  <button
-                    className="btn btn-ghost btn-sm text-error"
-                    onClick={() => setConfirmRegen(true)}
-                  >
-                    Regenerate link…
-                  </button>
+                  {!anonymous && (
+                    <button
+                      className="btn btn-ghost btn-sm text-error"
+                      onClick={() => setConfirmRegen(true)}
+                    >
+                      Regenerate link…
+                    </button>
+                  )}
                 </div>
                 <p className="text-xs text-base-content/50">
                   Already installed? Use the same button to reinstall — that&apos;s how
@@ -182,6 +227,20 @@ export function ConfigurePage() {
                 </p>
               </div>
             </section>
+
+            {anonymous && (
+              <div className="alert border border-base-300 bg-base-100 py-3 text-sm">
+                <span>
+                  <span className="font-medium">Want your own watchlist in Stremio?</span>{" "}
+                  Sign in to add catalogs built from your IMDb watchlist and the films you
+                  follow — those stay private to your account and get a personal link whose
+                  edits apply without reinstalling.
+                </span>
+                <button className="btn btn-primary btn-sm" onClick={() => onSignIn?.()}>
+                  Sign in
+                </button>
+              </div>
+            )}
 
             {/* Catalogs */}
             <section className="flex flex-col gap-3">
@@ -195,16 +254,28 @@ export function ConfigurePage() {
                   filters.
                 </p>
                 <p className="mt-2 text-xs text-base-content/50">
-                  <span className="font-medium text-base-content/70">Filter and sort edits</span>{" "}
-                  apply to an installed addon on their own, though Stremio caches catalog rows
-                  and can take a while to show them.{" "}
-                  <span className="font-medium text-base-content/70">
-                    Adding, removing, renaming, or toggling a catalog
-                  </span>{" "}
-                  changes the addon itself — Stremio keeps the catalog list it saw at install
-                  time, so <span className="font-medium text-base-content/70">reinstall</span>{" "}
-                  (button above) to apply those. Reinstalling also refreshes everything else
-                  immediately.
+                  {anonymous ? (
+                    <>
+                      Because there&apos;s no account, every change here produces a{" "}
+                      <span className="font-medium text-base-content/70">new link</span> —
+                      install it again to apply. Sign in if you&apos;d rather edit in place.
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-medium text-base-content/70">
+                        Filter and sort edits
+                      </span>{" "}
+                      apply to an installed addon on their own, though Stremio caches catalog
+                      rows and can take a while to show them.{" "}
+                      <span className="font-medium text-base-content/70">
+                        Adding, removing, renaming, or toggling a catalog
+                      </span>{" "}
+                      changes the addon itself — Stremio keeps the catalog list it saw at
+                      install time, so{" "}
+                      <span className="font-medium text-base-content/70">reinstall</span>{" "}
+                      (button above) to apply those.
+                    </>
+                  )}
                 </p>
               </div>
 
@@ -303,6 +374,7 @@ function CatalogCard({
   };
 
   const radar = isRadarSource(def.source);
+  const sortKeys = radar ? RADAR_SORT_KEYS : LIST_SORT_KEYS;
 
   return (
     <div className="card border border-base-300 bg-base-100">
@@ -319,7 +391,12 @@ function CatalogCard({
           <select
             className="select select-sm select-bordered w-auto"
             value={def.source}
-            onChange={(e) => onPatch({ source: e.target.value })}
+            onChange={(e) => {
+              const source = e.target.value;
+              // The sort vocabularies differ, so re-default when crossing kinds.
+              const key: CatalogSortKey = isRadarSource(source) ? "rank" : "digital";
+              onPatch({ source, sort: { key, dir: def.sort.dir } });
+            }}
             aria-label="Catalog source"
           >
             {sourceOptions.map((o) => (
@@ -349,7 +426,7 @@ function CatalogCard({
 
         {def.enabled && (
           <div className="flex flex-wrap gap-3">
-            {radar ? (
+            {radar && (
               <LabeledSelect
                 label="Region"
                 value={def.region}
@@ -359,47 +436,42 @@ function CatalogCard({
                   label: `${x.region} — ${x.name}`,
                 }))}
               />
-            ) : (
-              <>
-                <LabeledSelect
-                  label="Sort"
-                  value={def.sort.key}
-                  onChange={(key) => onPatch({ sort: { ...def.sort, key: key as SortKey } })}
-                  options={SORT_KEYS.map((k) => ({ value: k, label: SORT_LABELS[k] }))}
-                />
-                <LabeledSelect
-                  label="Direction"
-                  value={def.sort.dir}
-                  onChange={(dir) =>
-                    onPatch({ sort: { ...def.sort, dir: dir as "asc" | "desc" } })
-                  }
-                  options={[
-                    { value: "desc", label: "Descending ↓" },
-                    { value: "asc", label: "Ascending ↑" },
-                  ]}
-                />
-                <LabeledSelect
-                  label="Popularity"
-                  value={String(def.minVotes ?? "")}
-                  onChange={(v) => onPatch({ minVotes: v ? Number(v) : null })}
-                  options={VOTE_PRESETS.map((p) => ({
-                    value: String(p.value ?? ""),
-                    label: p.label,
-                  }))}
-                />
-                <LabeledSelect
-                  label="Status"
-                  value={def.status ?? ""}
-                  onChange={(v) =>
-                    onPatch({ status: (v || null) as CatalogDef["status"] })
-                  }
-                  options={[
-                    { value: "", label: "All statuses" },
-                    ...STATUS_ORDER.map((s) => ({ value: s, label: s })),
-                  ]}
-                />
-              </>
             )}
+            <LabeledSelect
+              label="Sort"
+              value={def.sort.key}
+              onChange={(key) => onPatch({ sort: { ...def.sort, key: key as CatalogSortKey } })}
+              options={sortKeys.map((k) => ({ value: k, label: SORT_LABELS[k] }))}
+            />
+            {def.sort.key !== "rank" && (
+              <LabeledSelect
+                label="Direction"
+                value={def.sort.dir}
+                onChange={(dir) => onPatch({ sort: { ...def.sort, dir: dir as "asc" | "desc" } })}
+                options={[
+                  { value: "desc", label: "Descending ↓" },
+                  { value: "asc", label: "Ascending ↑" },
+                ]}
+              />
+            )}
+            <LabeledSelect
+              label="Popularity"
+              value={String(def.minVotes ?? "")}
+              onChange={(v) => onPatch({ minVotes: v ? Number(v) : null })}
+              options={VOTE_PRESETS.map((p) => ({
+                value: String(p.value ?? ""),
+                label: p.label,
+              }))}
+            />
+            <LabeledSelect
+              label="Status"
+              value={def.status ?? ""}
+              onChange={(v) => onPatch({ status: (v || null) as CatalogDef["status"] })}
+              options={[
+                { value: "", label: "All statuses" },
+                ...STATUS_ORDER.map((s) => ({ value: s, label: s })),
+              ]}
+            />
           </div>
         )}
       </div>

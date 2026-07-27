@@ -15,6 +15,10 @@ export const APP_URL = "https://release-notifier.yoshevbot.uk";
 export const REGIONS = ["US", "BG", "GB", "DE"];
 export const PAGE_SIZE = 100;
 
+/** 1.2.0 = listing metadata (logo, contactEmail) + URL-configurable catalogs (#118). */
+export const ADDON_VERSION = "1.2.0";
+export const CONTACT_EMAIL = "vasil.yoshev@gmail.com";
+
 export const CATALOGS = [
   { id: "new-digital", name: "New on digital", window: "recent" as const },
   { id: "upcoming-digital", name: "Upcoming digital", window: "upcoming" as const },
@@ -24,27 +28,39 @@ export function windowForCatalog(catalogId: string): "recent" | "upcoming" | nul
   return CATALOGS.find((c) => c.id === catalogId)?.window ?? null;
 }
 
-/** The addon manifest (SPEC §12). Both catalogs, region-in-genre, extras optional
- * so the rows also appear on the Board. */
+/** Everything a public listing needs except the catalogs, shared by the plain
+ * manifest below and the URL-configured one (#118) so a configured install
+ * carries the same identity and metadata as the advertised addon. */
+export function anonManifestBase() {
+  return {
+    id: ADDON_ID,
+    version: ADDON_VERSION,
+    name: "Digital Release Radar",
+    description:
+      `Recently-released and upcoming digital movie releases, region by region. ` +
+      `Pick your regions, then sort and filter the rows however you like — ` +
+      `no account needed. Powered by ${APP_URL}`,
+    logo: `${APP_URL}/icons/icon-512.png`,
+    contactEmail: CONTACT_EMAIL,
+    resources: ["catalog"],
+    types: ["movie"],
+    idPrefixes: ["tt"],
+    // configurable funnels the Configure button to /configure (map #109).
+    behaviorHints: { configurable: true, configurationRequired: false },
+  };
+}
+
+/** The unconfigured manifest (SPEC §12) — what a stranger installs straight from
+ * a listing, and what the directory reads. Both catalogs, region-in-genre,
+ * extras optional so the rows also appear on the Board. */
 export function buildManifest() {
   const extra = [
     { name: "genre", options: REGIONS, isRequired: false },
     { name: "skip", isRequired: false },
   ];
   return {
-    id: ADDON_ID,
-    version: "1.1.0",
-    name: "Digital Release Radar",
-    description:
-      `Recently-released and upcoming digital movie releases, region by region. ` +
-      `Powered by ${APP_URL}`,
-    resources: ["catalog"],
-    types: ["movie"],
-    idPrefixes: ["tt"],
+    ...anonManifestBase(),
     catalogs: CATALOGS.map((c) => ({ type: "movie", id: c.id, name: c.name, extra })),
-    // configurable funnels the Configure button to /configure (map #109);
-    // the anon catalogs themselves stay exactly as they were.
-    behaviorHints: { configurable: true, configurationRequired: false },
   };
 }
 

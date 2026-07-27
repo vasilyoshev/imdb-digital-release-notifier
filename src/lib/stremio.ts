@@ -11,7 +11,10 @@ import type { TokenData } from "../../worker/personal";
 
 export {
   type CatalogDef,
+  type CatalogSortKey,
+  decodeCatalogs,
   defaultCatalogs,
+  encodeCatalogs,
   isRadarSource,
   listIdOfSource,
   parseCatalogs,
@@ -31,7 +34,8 @@ export function newCatalogId(): string {
   return `c-${crypto.randomUUID().slice(0, 8)}`;
 }
 
-/** The caller's addon row — null until first provisioned (RLS-scoped). */
+/** The caller's addon row — null until first provisioned (RLS-scoped).
+ * Disabled for anonymous visitors, who have no row and no token (#118). */
 export function useStremioConfig(enabled = true) {
   return useQuery({
     queryKey: ["stremio-config"],

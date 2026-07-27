@@ -23,6 +23,8 @@ run_worker_first = [
   "/catalog/movie/*",
   "/*/manifest.json",
   "/*/catalog/movie/*",
+  "/c/*/manifest.json",
+  "/c/*/catalog/movie/*",
 ]
 
 # Anon PostgREST surface for the Stremio addon (same public values the SPA build

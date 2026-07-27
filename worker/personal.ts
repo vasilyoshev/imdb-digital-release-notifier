@@ -14,12 +14,20 @@
 import { applyControls, type SortDir, type SortKey } from "../src/lib/table-controls";
 import {
   type DerivedStatus,
+  effectiveVotes,
   type Movie,
   STATUS_ORDER,
   statusOf,
   todayISO,
 } from "../src/lib/dashboard";
-import { APP_URL, CATALOGS, type Meta, PAGE_SIZE, REGIONS } from "./stremio-core";
+import {
+  anonManifestBase,
+  APP_URL,
+  CATALOGS,
+  type Meta,
+  PAGE_SIZE,
+  REGIONS,
+} from "./stremio-core";
 
 /** Addon tokens are 48 hex chars (24 random bytes) — hex can never contain
  * "manifest.json", which Stremio's Configure button replaces in the URL. */
@@ -63,13 +71,19 @@ export interface ListRow {
  * sources reuse the anon addon's catalog ids). */
 export type CatalogSource = string; // "list-<id>" | "new-digital" | "upcoming-digital"
 
+/** Radar rows arrive pre-ranked by the pipeline's own curation, which is the
+ * whole point of the radar — so radar catalogs get an extra sort key meaning
+ * "leave the curated order alone". It is deliberately not part of the Console's
+ * SortKey: no table column ranks rows this way. */
+export type CatalogSortKey = SortKey | "rank";
+
 /** One user-defined catalog, fully resolved (defaults filled in). */
 export interface CatalogDef {
   id: string;
   name: string;
   source: CatalogSource;
   enabled: boolean;
-  sort: { key: SortKey; dir: SortDir };
+  sort: { key: CatalogSortKey; dir: SortDir };
   minVotes: number | null;
   status: DerivedStatus | null;
   region: string;
@@ -107,13 +121,21 @@ function sanitizeDef(raw: unknown, lists: TokenList[]): CatalogDef | null {
   if (!list && !isRadarSource(source)) return null;
   const sort = (r.sort ?? {}) as Record<string, unknown>;
   const fallbackName = list?.name ?? CATALOGS.find((c) => c.id === source)?.name ?? source;
+  // Radar catalogs may keep the curated rank (and default to it); list catalogs
+  // have no rank to keep, so they default to newest-digital-first.
+  const radar = isRadarSource(source);
+  const allowedKeys: CatalogSortKey[] = radar ? ["rank", ...SORT_KEYS] : SORT_KEYS;
   return {
     id: r.id,
     name: typeof r.name === "string" && r.name.trim() ? r.name.trim() : fallbackName,
     source,
     enabled: r.enabled !== false,
     sort: {
-      key: SORT_KEYS.includes(sort.key as SortKey) ? (sort.key as SortKey) : "digital",
+      key: allowedKeys.includes(sort.key as CatalogSortKey)
+        ? (sort.key as CatalogSortKey)
+        : radar
+          ? "rank"
+          : "digital",
       dir: sort.dir === "asc" ? "asc" : "desc",
     },
     minVotes: typeof r.minVotes === "number" && r.minVotes > 0 ? r.minVotes : null,
@@ -143,13 +165,66 @@ export function defaultCatalogs(lists: TokenList[]): CatalogDef[] {
       name: c.name,
       source: c.id,
       enabled: true,
-      sort: { key: "digital", dir: "desc" },
+      sort: { key: "rank", dir: "desc" },
       minVotes: null,
       status: null,
       region: "US",
     });
   }
   return defs;
+}
+
+// ---- Anonymous configs carried in the URL (#118) ---------------------------
+//
+// A visitor with no account configures radar catalogs and installs; the config
+// travels base64url-encoded in the path instead of a DB row, so there is no
+// token to leak and nothing to revoke. base64url has no ".", so an encoded
+// config can never contain "manifest.json" — the #110 constraint holds.
+
+function b64urlEncode(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function b64urlDecode(encoded: string): string {
+  const b64 = encoded.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+  const binary = atob(padded);
+  return new TextDecoder().decode(Uint8Array.from(binary, (c) => c.charCodeAt(0)));
+}
+
+/** Only the fields that differ from the resolved defaults go into the URL, so
+ * a typical config stays well under a hundred characters. */
+export function encodeCatalogs(defs: CatalogDef[]): string {
+  const slim = defs.map((d) => {
+    const base = defaultCatalogs([]).find((b) => b.source === d.source);
+    const out: Record<string, unknown> = { id: d.id, source: d.source };
+    if (d.name !== (base?.name ?? d.source)) out.name = d.name;
+    if (!d.enabled) out.enabled = false;
+    if (d.sort.key !== (base?.sort.key ?? "digital")) out.sort = d.sort;
+    else if (d.sort.dir !== "desc") out.sort = d.sort;
+    if (d.minVotes != null) out.minVotes = d.minVotes;
+    if (d.status != null) out.status = d.status;
+    if (d.region !== "US") out.region = d.region;
+    return out;
+  });
+  return b64urlEncode(JSON.stringify(slim));
+}
+
+/** Decode an anonymous config. Resolved against an empty list set, so any
+ * list-backed source is dropped — private lists are never URL-addressable.
+ * Anything unparseable falls back to the plain radar pair rather than erroring,
+ * so a mangled link still installs something sensible. */
+export function decodeCatalogs(encoded: string): CatalogDef[] {
+  try {
+    const parsed = JSON.parse(b64urlDecode(encoded));
+    if (!Array.isArray(parsed)) return defaultCatalogs([]);
+    return parseCatalogs({ catalogs: parsed }, []);
+  } catch {
+    return defaultCatalogs([]);
+  }
 }
 
 /** The user's catalogs, in order — the stored array when present and valid,
@@ -161,22 +236,23 @@ export function parseCatalogs(config: TokenData["config"], lists: TokenList[]): 
     .filter((d): d is CatalogDef => d !== null);
 }
 
+function catalogEntries(defs: CatalogDef[]) {
+  const skip = [{ name: "skip", isRequired: false }];
+  const radarExtra = [{ name: "genre", options: REGIONS, isRequired: false }, ...skip];
+  return defs
+    .filter((d) => d.enabled)
+    .map((d) => ({
+      type: "movie",
+      id: d.id,
+      name: d.name,
+      extra: isRadarSource(d.source) ? radarExtra : skip,
+    }));
+}
+
 /** The personal manifest: one Stremio catalog per enabled definition, in the
  * user's order. A dead token (data null) gets an empty-catalog manifest
  * pointing at /configure — never a 404, so stale installs fail soft (#110). */
 export function buildPersonalManifest(data: TokenData | null) {
-  const skip = [{ name: "skip", isRequired: false }];
-  const radarExtra = [{ name: "genre", options: REGIONS, isRequired: false }, ...skip];
-  const catalogs = data
-    ? parseCatalogs(data.config, data.lists)
-        .filter((d) => d.enabled)
-        .map((d) => ({
-          type: "movie",
-          id: d.id,
-          name: d.name,
-          extra: isRadarSource(d.source) ? radarExtra : skip,
-        }))
-    : [];
   return {
     id: PERSONAL_ADDON_ID,
     version: "1.0.0",
@@ -189,9 +265,16 @@ export function buildPersonalManifest(data: TokenData | null) {
     resources: ["catalog"],
     types: ["movie"],
     idPrefixes: ["tt"],
-    catalogs,
+    catalogs: data ? catalogEntries(parseCatalogs(data.config, data.lists)) : [],
     behaviorHints: { configurable: true, configurationRequired: false },
   };
+}
+
+/** The anonymous, URL-configured manifest (#118) — same identity and listing
+ * metadata as the plain public addon, so a configured install replaces rather
+ * than duplicates it. */
+export function buildAnonManifest(defs: CatalogDef[]) {
+  return { ...anonManifestBase(), catalogs: catalogEntries(defs) };
 }
 
 /** Movie plus the overview the meta description needs (the Console's Movie
@@ -254,13 +337,59 @@ export function buildListMetas(
   const byStatus = def.status
     ? movies.filter((m) => statusOf(m, today) === def.status)
     : movies;
-  const sorted = applyControls(
-    byStatus,
-    {
-      sort: def.sort,
-      filters: { providers: [], genres: [], yearMin: null, yearMax: null, minVotes: def.minVotes },
-    },
-    today,
-  ) as ListMovie[];
-  return sorted.slice(skip, skip + PAGE_SIZE).map(movieToMeta);
+  const ordered =
+    def.sort.key === "rank"
+      ? // Keep the caller's order (radar rows arrive rank-ordered); the vote
+        // floor still applies, so filter here rather than through applyControls.
+        byStatus.filter((m) => def.minVotes == null || effectiveVotes(m) >= def.minVotes)
+      : (applyControls(
+          byStatus,
+          {
+            sort: { key: def.sort.key, dir: def.sort.dir },
+            filters: {
+              providers: [],
+              genres: [],
+              yearMin: null,
+              yearMax: null,
+              minVotes: def.minVotes,
+            },
+          },
+          today,
+        ) as ListMovie[]);
+  return ordered.slice(skip, skip + PAGE_SIZE).map(movieToMeta);
+}
+
+/** Every radar row for one region × window, rank-ordered, shaped like a list
+ * row so both catalog kinds run through {@link buildListMetas}. Radar sets are
+ * tiny (tens of rows per region/window), so this fetches the lot and lets the
+ * Worker sort — the alternative, sorting in SQL, can't express the Console's
+ * ladder. The one impure function here, mirroring stremio-core's. */
+export async function fetchRadarRows(
+  base: string,
+  anonKey: string,
+  window: "recent" | "upcoming",
+  region: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<ListRow[]> {
+  const params = new URLSearchParams({
+    select:
+      "digital_date,movies!inner(imdb_id,tmdb_id,title,poster_path,year,overview," +
+      "theatrical_date,imdb_rating,imdb_votes,tmdb_rating,tmdb_votes,popularity)",
+    region: `eq.${region}`,
+    window: `eq.${window}`,
+    "movies.imdb_id": "not.is.null",
+    order: "rank.asc",
+    limit: "500",
+  });
+  const res = await fetchFn(`${base}/rest/v1/radar_entries?${params}`, {
+    headers: { apikey: anonKey, authorization: `Bearer ${anonKey}` },
+  });
+  if (!res.ok) throw new Error(`PostgREST ${res.status}: ${await res.text()}`);
+  const rows = (await res.json()) as {
+    digital_date: string;
+    movies: Omit<ListRow, "digital_date" | "added_at"> | null;
+  }[];
+  return rows
+    .filter((r) => r.movies != null)
+    .map((r) => ({ ...r.movies!, digital_date: r.digital_date, added_at: null }));
 }

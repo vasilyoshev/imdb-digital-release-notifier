@@ -13,10 +13,14 @@
  */
 import { buildManifest, fetchCatalog, parseExtras, windowForCatalog } from "./stremio-core";
 import {
+  buildAnonManifest,
   buildListMetas,
   buildPersonalManifest,
+  decodeCatalogs,
+  fetchRadarRows,
   listIdOfSource,
   parseCatalogs,
+  type CatalogDef,
   type ListRow,
   type TokenData,
 } from "./personal";
@@ -78,6 +82,25 @@ function splitCatalogPath(tail: string): { catalogId: string; extraRaw: string |
   };
 }
 
+/** One radar-backed catalog's metas, shared by the anonymous and token'd routes.
+ * The in-Stremio region dropdown wins when actually used; otherwise the
+ * configured region (parseExtras alone can't tell "US picked" from "no genre
+ * given" — both come back as US). */
+async function radarMetas(
+  env: Env,
+  def: CatalogDef,
+  extraRaw: string | undefined,
+  extraRegion: string,
+  skip: number,
+): Promise<unknown[]> {
+  const window = windowForCatalog(def.source);
+  if (!window) return [];
+  const hasGenre = extraRaw != null && /(^|&)genre=/.test(decodeURIComponent(extraRaw));
+  const region = hasGenre ? extraRegion : def.region;
+  const rows = await fetchRadarRows(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_ANON_KEY, window, region);
+  return buildListMetas(rows, def, skip);
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -107,6 +130,37 @@ export default {
         return json({ metas });
       } catch (err) {
         return json({ metas: [] }, CACHE_ANON, { "x-error": String(err) });
+      }
+    }
+
+    // Anonymous URL-configured addon (#118): /c/{config}/manifest.json and
+    // /c/{config}/catalog/movie/…. No account, no token, no DB — the config
+    // rides in the path, and decoding resolves it against an empty list set so
+    // only radar catalogs can ever come out. /c/{config}/configure is an SPA
+    // route (Stremio's Configure target) and falls through below.
+    if (path.startsWith("/c/")) {
+      const rest = path.slice("/c/".length);
+      const slash = rest.indexOf("/");
+      if (slash > 0) {
+        const defs = decodeCatalogs(rest.slice(0, slash));
+        const sub = rest.slice(slash);
+
+        if (sub === "/manifest.json") {
+          return json(buildAnonManifest(defs), CACHE_PERSONAL);
+        }
+
+        if (sub.startsWith("/catalog/movie/")) {
+          const { catalogId, extraRaw } = splitCatalogPath(sub.slice("/catalog/movie/".length));
+          const { region: extraRegion, skip } = parseExtras(extraRaw);
+          const def = defs.find((d) => d.id === catalogId);
+          if (!def || !def.enabled) return json({ metas: [] }, CACHE_PERSONAL);
+          try {
+            const metas = await radarMetas(env, def, extraRaw, extraRegion, skip);
+            return json({ metas }, CACHE_PERSONAL);
+          } catch (err) {
+            return json({ metas: [] }, CACHE_PERSONAL, { "x-error": String(err) });
+          }
+        }
       }
     }
 
@@ -151,20 +205,7 @@ export default {
             return json({ metas: buildListMetas(rows, def, skip) }, CACHE_PERSONAL);
           }
 
-          const window = windowForCatalog(def.source);
-          if (!window) return json({ metas: [] }, CACHE_PERSONAL);
-          // The in-Stremio region dropdown wins when used; otherwise the
-          // configured region (parseExtras alone can't tell "US picked" from
-          // "no genre given" — both come back as US).
-          const hasGenre = extraRaw != null && /(^|&)genre=/.test(decodeURIComponent(extraRaw));
-          const region = hasGenre ? extraRegion : def.region;
-          const metas = await fetchCatalog(
-            env.VITE_SUPABASE_URL,
-            env.VITE_SUPABASE_ANON_KEY,
-            window,
-            region,
-            skip,
-          );
+          const metas = await radarMetas(env, def, extraRaw, extraRegion, skip);
           return json({ metas }, CACHE_PERSONAL);
         } catch (err) {
           return json({ metas: [] }, CACHE_PERSONAL, { "x-error": String(err) });
