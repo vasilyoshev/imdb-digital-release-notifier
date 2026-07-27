@@ -40,8 +40,12 @@ jobs:
           APP=https://release-notifier.yoshevbot.uk
           failures=""
 
-          check() { # name, expected_code, url, [header]
-            local name="$1" want="$2" url="$3" hdr="${4:-}"
+          # A status code alone is not enough for the addon routes: when the
+          # Worker's run_worker_first rules don't apply, the SPA fallback answers
+          # with a cheerful 200 and an HTML body. So every JSON surface also
+          # asserts a substring that only the real response contains.
+          check() { # name, expected_code, url, [expected_substring], [header]
+            local name="$1" want="$2" url="$3" needle="${4:-}" hdr="${5:-}"
             local code
             if [ -n "$hdr" ]; then
               code=$(curl -sS -o /tmp/body -w '%{http_code}' --max-time 20 -H "$hdr" "$url" || echo 000)
@@ -51,6 +55,9 @@ jobs:
             if [ "$code" != "$want" ]; then
               echo "FAIL $name -> HTTP $code (want $want)"
               failures="${failures}- **${name}**: HTTP \`${code}\` (expected \`${want}\`) — \`${url}\`"$'\n'
+            elif [ -n "$needle" ] && ! grep -qF "$needle" /tmp/body; then
+              echo "FAIL $name -> HTTP $code but body lacks '$needle'"
+              failures="${failures}- **${name}**: HTTP \`${code}\` but the body did not contain \`${needle}\` (wrong handler served it?) — \`${url}\`"$'\n'
             else
               echo "ok   $name -> $code"
             fi
@@ -59,15 +66,23 @@ jobs:
           # Auth: the one that died quietly. Health first, then the Google
           # authorize redirect, which is what actually breaks when the
           # GOOGLE_* env vars go empty (#115) — health alone can look fine.
-          check "Auth health" 200 "$API/auth/v1/health" "apikey: $ANON"
+          check "Auth health" 200 "$API/auth/v1/health" "" "apikey: $ANON"
           check "Google sign-in redirect" 302 "$API/auth/v1/authorize?provider=google&redirect_to=$APP"
 
           # Data surface the whole app reads through.
-          check "PostgREST (radar)" 200 "$API/rest/v1/radar_entries?select=movie_id&limit=1" "apikey: $ANON"
+          check "PostgREST (radar)" 200 "$API/rest/v1/radar_entries?select=movie_id&limit=1" \
+            '"movie_id"' "apikey: $ANON"
 
-          # Frontend + both Stremio addon surfaces.
-          check "Frontend" 200 "$APP/"
-          check "Stremio addon manifest" 200 "$APP/manifest.json"
+          check "Frontend" 200 "$APP/" '<div id="root">'
+
+          # The published addon surface, and the anonymous URL-configured one —
+          # separate Worker code paths that can break independently of the site.
+          # The encoded config below is the plain radar pair (#118).
+          RADAR_CFG='W3siaWQiOiJuZXctZGlnaXRhbCIsInNvdXJjZSI6Im5ldy1kaWdpdGFsIn0seyJpZCI6InVwY29taW5nLWRpZ2l0YWwiLCJzb3VyY2UiOiJ1cGNvbWluZy1kaWdpdGFsIn1d'
+          check "Stremio addon manifest" 200 "$APP/manifest.json" 'release-notifier.radar'
+          check "Stremio addon catalog" 200 "$APP/catalog/movie/new-digital.json" '"metas"'
+          check "Stremio anonymous config route" 200 "$APP/c/$RADAR_CFG/manifest.json" \
+            'release-notifier.radar'
 
           if [ -n "$failures" ]; then
             # Randomised heredoc delimiter: a fixed "EOF" lets any future probe
