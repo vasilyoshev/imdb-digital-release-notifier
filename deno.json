@@ -2,5 +2,8 @@
   "compilerOptions": {
     "lib": ["deno.ns", "dom", "dom.iterable"]
   },
-  "nodeModulesDir": "auto"
+  "nodeModulesDir": "auto",
+  // worker/ imports the Console's pure logic from src/lib with extensionless
+  // specifiers (Vite resolves them); sloppy-imports lets `deno test` do the same.
+  "unstable": ["sloppy-imports"]
 }

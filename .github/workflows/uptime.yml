@@ -1,0 +1,110 @@
+name: Uptime check
+
+# Why this exists: GoTrue crash-looped from 2026-07-21 to 07-26 and nobody
+# noticed for five days, because the public radar and already-signed-in sessions
+# keep working while new logins are dead (repo #115). Nothing was watching the
+# surfaces that fail quietly. This runs off-box, so it also catches the box
+# being down entirely.
+#
+# On failure it opens ONE issue (reused while it stays open) and comments on
+# subsequent failures, then closes it automatically once everything recovers.
+#
+# Note: GitHub disables scheduled workflows on repos with no pushes for 60 days.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+permissions:
+  issues: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe the surfaces that fail silently
+        id: probe
+        env:
+          ANON: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          set -uo pipefail
+          API=https://api.notifier.yoshevbot.uk
+          APP=https://release-notifier.yoshevbot.uk
+          failures=""
+
+          check() { # name, expected_code, url, [header]
+            local name="$1" want="$2" url="$3" hdr="${4:-}"
+            local code
+            if [ -n "$hdr" ]; then
+              code=$(curl -sS -o /tmp/body -w '%{http_code}' --max-time 20 -H "$hdr" "$url" || echo 000)
+            else
+              code=$(curl -sS -o /tmp/body -w '%{http_code}' --max-time 20 "$url" || echo 000)
+            fi
+            if [ "$code" != "$want" ]; then
+              echo "FAIL $name -> HTTP $code (want $want)"
+              failures="${failures}- **${name}**: HTTP \`${code}\` (expected \`${want}\`) — \`${url}\`"$'\n'
+            else
+              echo "ok   $name -> $code"
+            fi
+          }
+
+          # Auth: the one that died quietly. Health first, then the Google
+          # authorize redirect, which is what actually breaks when the
+          # GOOGLE_* env vars go empty (#115) — health alone can look fine.
+          check "Auth health" 200 "$API/auth/v1/health" "apikey: $ANON"
+          check "Google sign-in redirect" 302 "$API/auth/v1/authorize?provider=google&redirect_to=$APP"
+
+          # Data surface the whole app reads through.
+          check "PostgREST (radar)" 200 "$API/rest/v1/radar_entries?select=movie_id&limit=1" "apikey: $ANON"
+
+          # Frontend + both Stremio addon surfaces.
+          check "Frontend" 200 "$APP/"
+          check "Stremio addon manifest" 200 "$APP/manifest.json"
+
+          if [ -n "$failures" ]; then
+            {
+              echo "failed=true"
+              echo "report<<EOF"
+              echo "$failures"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "failed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open or update the outage issue
+        if: steps.probe.outputs.failed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORT: ${{ steps.probe.outputs.report }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          existing=$(gh issue list --label uptime --state open --limit 1 --json number -q '.[0].number' || true)
+          body=$(printf 'Automated uptime check failed at %s UTC.\n\n%s\n[Run log](%s)\n' \
+            "$(date -u '+%Y-%m-%d %H:%M')" "$REPORT" "$RUN")
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "🔴 Uptime check failing" --label uptime --body "$body"
+          fi
+
+      - name: Close the outage issue once everything is healthy again
+        if: steps.probe.outputs.failed == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          existing=$(gh issue list --label uptime --state open --limit 1 --json number -q '.[0].number' || true)
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" --comment "All checks passing again — closing automatically."
+          fi
+
+      - name: Fail the run so the workflow shows red
+        if: steps.probe.outputs.failed == 'true'
+        run: exit 1
